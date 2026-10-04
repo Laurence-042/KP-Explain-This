@@ -25,28 +25,31 @@ describe('rollDie / rollDice', () => {
 })
 
 describe('diceToNumber（骰面按位组合 ≈ 1d10^K）', () => {
-  it('个/十/百位组合，骰面 1–10 对应数字 0–9', () => {
-    expect(diceToNumber([1, 1, 1])).toBe(0) // 000
-    expect(diceToNumber([10, 10, 10])).toBe(999) // 999
-    expect(diceToNumber([3, 10, 1])).toBe(290) // 2 9 0
-    expect(diceToNumber([1, 2])).toBe(1) // 两位：01
-    expect(diceToNumber([4])).toBe(3) // 单骰：3
+  it('个/十/百位组合，面 1–9 即数字本身、面 10 视为 0', () => {
+    expect(diceToNumber([1, 1, 1])).toBe(111)
+    expect(diceToNumber([10, 10, 10])).toBe(0) // 000
+    expect(diceToNumber([3, 10, 1])).toBe(301)
+    expect(diceToNumber([1, 2])).toBe(12) // 两位：12
+    expect(diceToNumber([4])).toBe(4) // 单骰：4
+    // 用户示例：8 10 4 → 804；10 7 6 → 076 = 76
+    expect(diceToNumber([8, 10, 4])).toBe(804)
+    expect(diceToNumber([10, 7, 6])).toBe(76)
   })
 })
 
 describe('computeRollOnPage', () => {
   it('位组合数 mod 总页数得到 nextPageIndex', () => {
-    expect(computeRollOnPage(doc, 0, [6, 6, 6]).nextPageIndex).toBe(1) // 555 % 2
-    expect(computeRollOnPage(doc, 0, [5, 5, 5]).nextPageIndex).toBe(0) // 444 % 2
+    expect(computeRollOnPage(doc, 0, [5, 5, 5]).nextPageIndex).toBe(1) // 555 % 2
+    expect(computeRollOnPage(doc, 0, [4, 4, 4]).nextPageIndex).toBe(0) // 444 % 2
   })
 
   it('关键词取自当前页且互不相同', () => {
-    const r = computeRollOnPage(doc, 0, [1, 6, 2])
-    expect(r.picks.map((p) => p.keyword)).toEqual(['knife', 'debt', 'winter'])
+    const r = computeRollOnPage(doc, 0, [1, 2, 8])
+    expect(r.picks.map((p) => p.keyword)).toEqual(['knife', 'winter', 'debt'])
   })
 
   it('当前页有效词耗尽时越页取词', () => {
-    const r = computeRollOnPage(doc, 0, [1, 5, 10])
+    const r = computeRollOnPage(doc, 0, [1, 6, 4])
     expect(r.picks.map((p) => p.keyword)).toEqual(['knife', 'debt', 'glass'])
     expect(r.picks[2].pageIndex).toBe(1)
   })
@@ -62,6 +65,6 @@ describe('computeInitPage', () => {
   it('只决定初始页', () => {
     const r = computeInitPage(doc, [3, 3, 3])
     expect(r.dice).toEqual([3, 3, 3])
-    expect(r.pageIndex).toBe(222 % 2) // 位组合 222 → 0
+    expect(r.pageIndex).toBe(333 % 2) // 位组合 333 → 1
   })
 })

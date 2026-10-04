@@ -71,9 +71,7 @@ const totalPages = computed(() => (props.doc ? pageCount(props.doc) : 0))
     <div class="book-page-body" :class="{ blurred: blurred }">
       <div v-if="doc && segments.pageText" class="book-text">
         <template v-for="(seg, i) in segments.parts" :key="i">
-          <mark v-if="seg.pick" class="book-hit" :data-die="seg.pick.dieIndex + 1">
-            <sup class="hit-die">{{ seg.pick.dieIndex + 1 }}</sup>{{ seg.text }}
-          </mark>
+          <mark v-if="seg.pick" class="book-hit">{{ seg.text }}</mark>
           <template v-else>{{ seg.text }}</template>
         </template>
       </div>

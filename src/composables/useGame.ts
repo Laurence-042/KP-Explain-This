@@ -15,6 +15,7 @@ import type {
   WorldState,
 } from '../core/types'
 import { parsePdfPages, parseTxt } from '../core/book'
+import { diceToNumber } from '../core/randomizer'
 import { narrativeViewForStream } from '../core/json-out'
 import {
   buildSave,
@@ -53,6 +54,10 @@ export type DiceOverlayEntry = {
   isKp: boolean
   bookName: string
   dice: number[]
+  /** 骰面按位组合出的数（8·10·4 → 804），演出时展示推导算式 */
+  diceNumber: number
+  /** 取模算式直接得到的页索引（未经 nearestValidPage 映射） */
+  modPage: number
   keywords: string[]
   /** 骰子落下的当前页文本（初掷为空：骰子落在封皮上） */
   pageText: string
@@ -202,17 +207,20 @@ export function useGame(config: UseConfig) {
         lastDice.value = { ...lastDice.value, [e.roleId]: e.dice }
         const role = engine?.controllers.find((c) => c.role.id === e.roleId)?.role
         const book = role ? bookDocs[role.bookId] : undefined
+        const total = totalPagesOf(e.roleId)
         pushOverlayEntry({
           roleId: e.roleId,
           roleName: role?.name ?? e.roleId,
           isKp: role?.kind === 'kp',
           bookName: book?.name ?? '',
           dice: e.dice,
+          diceNumber: diceToNumber(e.dice),
+          modPage: total > 0 ? diceToNumber(e.dice) % total : 0,
           keywords: [],
           pageText: '',
           lands: [],
           nextPage: e.pageIndex,
-          totalPages: totalPagesOf(e.roleId),
+          totalPages: total,
           init: true,
         })
         break
@@ -222,12 +230,15 @@ export function useGame(config: UseConfig) {
         const role = engine?.controllers.find((c) => c.role.id === e.roleId)?.role
         const book = role ? bookDocs[role.bookId] : undefined
         const currentPage = engine?.pages[e.roleId] ?? 0
+        const total = totalPagesOf(e.roleId)
         pushOverlayEntry({
           roleId: e.roleId,
           roleName: role?.name ?? e.roleId,
           isKp: role?.kind === 'kp',
           bookName: book?.name ?? '',
           dice: e.roll.dice,
+          diceNumber: diceToNumber(e.roll.dice),
+          modPage: total > 0 ? diceToNumber(e.roll.dice) % total : 0,
           keywords: e.roll.picks.map((p) => p.keyword),
           pageText: book?.pages[currentPage]?.text ?? '',
           lands: e.roll.picks.map((p) => ({
@@ -238,7 +249,7 @@ export function useGame(config: UseConfig) {
             length: p.length,
           })),
           nextPage: e.roll.nextPageIndex,
-          totalPages: totalPagesOf(e.roleId),
+          totalPages: total,
           init: false,
         })
         syncAll()

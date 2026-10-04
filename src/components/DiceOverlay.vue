@@ -24,7 +24,7 @@ const FACES = [1, 6, 3, 4, 5, 2]
 
 const activeIndex = ref(0)
 const bookRef = ref<HTMLElement | null>(null)
-const diceSpots = ref<Array<{ left: string; top: string; delay: string; value: number }>>([])
+const diceSpots = ref<Array<{ left: string; top: string; delay: string; value: number; digit: number }>>([])
 let timers: ReturnType<typeof setTimeout>[] = []
 
 const entry = computed<DiceOverlayEntry | undefined>(
@@ -61,6 +61,7 @@ function measureDice(e: DiceOverlayEntry): void {
   const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max)
 
   diceSpots.value = e.dice.map((value, i) => {
+    const digit = value % 10
     const mark = marks.find((el) => el.dataset.land === String(i))
     if (mark) {
       const r = mark.getBoundingClientRect()
@@ -69,6 +70,7 @@ function measureDice(e: DiceOverlayEntry): void {
         top: clamp(r.top - bookRect.top - 42, -8, bookRect.height - 54) + 'px',
         delay: i * 0.16 + 's',
         value,
+        digit,
       }
     }
     // 落词不在本页（跨页兜底）或合书初掷：沿底部/封皮散开
@@ -77,6 +79,7 @@ function measureDice(e: DiceOverlayEntry): void {
       top: e.init ? Math.round(bookRect.height * 0.42) + 'px' : bookRect.height - 86 + 'px',
       delay: i * 0.16 + 's',
       value,
+      digit,
     }
   })
 }
@@ -151,19 +154,22 @@ onBeforeUnmount(clearTimers)
               </div>
             </div>
 
-            <!-- 骰子：落在词上 -->
+            <!-- 骰子：落在词上，骰子下方标注它代表的数字位（10 = 0） -->
             <div
               v-for="(d, i) in diceSpots"
               :key="activeIndex + '-' + i"
-              class="die3d stage-die"
-              :style="{ left: d.left, top: d.top, animationDelay: d.delay }"
+              class="stage-die"
+              :style="{ left: d.left, top: d.top }"
             >
-              <span
-                v-for="(f, fi) in FACES"
-                :key="fi"
-                class="die3d-face"
-                :data-face="fi"
-              >{{ fi === 0 ? d.value : f }}</span>
+              <div class="die3d stage-cube" :style="{ animationDelay: d.delay }">
+                <span
+                  v-for="(f, fi) in FACES"
+                  :key="fi"
+                  class="die3d-face"
+                  :data-face="fi"
+                >{{ fi === 0 ? d.value : f }}</span>
+              </div>
+              <span class="die-digit" :style="{ animationDelay: `calc(${d.delay} + 0.85s)` }">= {{ d.digit }}</span>
             </div>
 
             <div class="stage-spine" />
@@ -182,8 +188,20 @@ onBeforeUnmount(clearTimers)
                 :style="{ animationDelay: 1.05 + i * 0.15 + 's' }"
               >{{ kw }}</el-tag>
             </div>
-            <div class="stage-next" :style="{ animationDelay: '1.5s' }">
-              {{ t('diceOverlay.flipTo', { n: entry.nextPage + 1, total: entry.totalPages }) }}
+            <!-- 骰面 → 数字位 → 组合数 → 取模 → 页码：完整推导让玩家看懂规则 -->
+            <div class="stage-math" :style="{ animationDelay: '1.35s' }">
+              <span class="math-step">{{ entry.dice.map((d) => d % 10).join(' · ') }} = {{ entry.diceNumber }}</span>
+              <span class="math-arrow">→</span>
+              <span class="math-step">{{ t('diceOverlay.modFormula', { num: entry.diceNumber, total: entry.totalPages, mod: entry.modPage + 1 }) }}</span>
+              <span class="math-arrow">→</span>
+              <span class="math-page">{{ t('diceOverlay.flipTo', { n: entry.nextPage + 1, total: entry.totalPages }) }}</span>
+            </div>
+            <div
+              v-if="entry.modPage !== entry.nextPage"
+              class="stage-mapped"
+              :style="{ animationDelay: '1.55s' }"
+            >
+              {{ t('diceOverlay.mappedNote', { from: entry.modPage + 1, to: entry.nextPage + 1 }) }}
             </div>
             <div class="dice-overlay-hint">{{ t('diceOverlay.hint') }}</div>
           </div>

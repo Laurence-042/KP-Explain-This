@@ -60,12 +60,12 @@ const messages = {
     abortHint: '中止当前生成（该次输出将作废）',
     retryInterrupted: '重试生成',
     rerollScene: '重骰场景',
-    rerollHint: '需要全体角色同意（KP 会同意）：回滚本轮世界状态与剧情，重新掷骰并生成新场景',
+    rerollHint: '需要全体角色同意（KP 会同意）：跳过本轮场景，翻到本轮骰面指示的页重掷开局',
     rerollConfirmTitle: '重骰本场景？',
-    rerollConfirmText: '本轮的世界状态与剧情将被回滚，重新掷骰并生成一个全新的场景。KP 会自动同意。此操作不可撤销。',
+    rerollConfirmText: '本轮场景将被跳过：世界状态与剧情回滚，书本直接翻到本轮骰面指示的页，在那里重掷骰子、生成全新场景。KP 会自动同意。此操作不可撤销。',
     rerollConfirmYes: '同意并重骰',
     cancel: '取消',
-    rerollStarted: '全体同意，正在重骰本场景…',
+    rerollStarted: '全体同意，跳过本场景并翻页重掷…',
     backToSetup: '已返回开局设置',
     flippingText: '……',
 
@@ -73,7 +73,9 @@ const messages = {
     diceOverlay: {
       title: '掷骰',
       initialRoll: '合书初掷',
-      flipTo: '→ 翻到第 {n} / {total} 页',
+      modFormula: '{num} mod {total} = {mod}',
+      flipTo: '翻到第 {n} / {total} 页',
+      mappedNote: '第 {from} 页没有文字，就近翻到第 {to} 页',
       hint: '点击任意处继续',
     },
 
@@ -83,6 +85,7 @@ const messages = {
     kpTag: '主持人',
     showKpKeywords: '显示',
     hideKpKeywords: '隐藏',
+    nextFlipPage: '场景结束翻到第 {n} 页',
 
     // 书页
     bookLabel: '的书',

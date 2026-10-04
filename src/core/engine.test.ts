@@ -99,7 +99,7 @@ function makeMocks() {
   }
 }
 
-function makeGame(kpReply?: string[]) {
+function makeGame(kpReply?: string[], bookTextOverride?: string) {
   const mocks = makeMocks()
   if (kpReply) mocks.setKpReplies(kpReply)
 
@@ -117,7 +117,7 @@ function makeGame(kpReply?: string[]) {
     onRejected: (reason) => rejectedReasons.push(reason),
   })
   const kp = new LlmKpController(kpRole, kpSession)
-  const books = { b1: parseTxt('b1', '测试书', bookText) }
+  const books = { b1: parseTxt('b1', '测试书', bookTextOverride ?? bookText) }
 
   return { engine, human, kp, kpSession, validatorSession, events, books, mocks, rejectedReasons, kpRole, pcRole }
 }
@@ -220,8 +220,10 @@ describe('GameEngine：控制器驱动循环', () => {
 })
 
 describe('GameEngine：重骰（全体同意）', () => {
-  it('回滚世界/日志/KP 历史到本轮开始，重掷骰子并重新开场', async () => {
-    const ctx = makeGame([KP_SCENE_REPLY, KP_RESOLVE_REPLY, KP_SCENE_REPLY])
+  it('回滚本轮并跳过：翻到首轮骰面指示的页，在新页重掷并重新开场', async () => {
+    // 多页书：让"跳过本轮翻页"可以被观察到（默认 100 词只有 1 页）
+    const multiPageText = Array.from({ length: 1000 }, (_, i) => `w${String(i).padStart(3, '0')}`).join(' ')
+    const ctx = makeGame([KP_SCENE_REPLY, KP_RESOLVE_REPLY, KP_SCENE_REPLY], multiPageText)
     await start(ctx.engine, [ctx.kp, ctx.human], ctx.books)
     await waitFor(() => ctx.human.awaitingAction)
 
@@ -232,6 +234,7 @@ describe('GameEngine：重骰（全体同意）', () => {
     const worldBeforeReroll = JSON.stringify(ctx.engine.world)
     const logBeforeReroll = ctx.engine.log.length
     const kpMsgsBeforeReroll = ctx.kpSession.messages.length
+    const pendingBefore = { ...ctx.engine.pendingNextPages }
     expect(ctx.human.awaitingAction).toBe(true)
 
     const ok = await ctx.engine.requestReroll('pc-a')
@@ -241,9 +244,14 @@ describe('GameEngine：重骰（全体同意）', () => {
     // 世界回滚到本轮开场后的状态并由新场景重建
     expect(ctx.engine.world.location).toBe('雪夜小巷')
     expect(ctx.engine.world.inventory['pc-a']).toEqual([]) // 仓库钥匙被回滚
+    // 重骰 = 跳过本轮：书本翻到首轮骰面指示的页（重掷在新页取词）
+    expect(ctx.engine.round).toBe(2)
+    expect(ctx.engine.pages['kp']).toBe(pendingBefore['kp'])
+    expect(ctx.engine.pages['pc-a']).toBe(pendingBefore['pc-a'])
+    expect(ctx.engine.keywords['kp']).toEqual(ctx.engine.rolls['kp']?.picks.map((p) => p.keyword) ?? [])
     // 日志被截断到本轮前再追加：round + 新 scene + 重骰 system
     expect(ctx.engine.log.length).toBeLessThan(logBeforeReroll + 4)
-    expect(ctx.engine.log.some((l) => l.type === 'system' && l.text.includes('重来'))).toBe(true)
+    expect(ctx.engine.log.some((l) => l.type === 'system' && l.text.includes('跳过'))).toBe(true)
     // KP 历史截断：本轮开场前 1 条（user+assistant 2 条）→ 重新开场后 = 2 条
     expect(ctx.kpSession.messages.length).toBe(2)
     expect(kpMsgsBeforeReroll).toBeGreaterThan(2)

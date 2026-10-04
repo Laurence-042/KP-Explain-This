@@ -24,12 +24,19 @@ export function rollDice(count: number, sides: number = DICE_SIDES): number[] {
 }
 
 /**
- * 骰面按位组合：K 个 1d10 依次作为个/十/百…位（骰面 1–10 对应数字 0–9），
+ * 骰面 → 数字位：面 1–9 即数字本身，面 10 视为 0（百分骰惯例）。
+ */
+export function dieDigit(dieValue: number): number {
+  return dieValue % 10
+}
+
+/**
+ * 骰面按位组合：K 个 1d10 依次作为个/十/百…位（面 1–9 = 数字，面 10 = 0），
  * 本质上是一次均匀的 1d(10^K)。翻页页码 = 该数 mod 总页数。
  */
 export function diceToNumber(dice: number[]): number {
   let n = 0
-  for (const d of dice) n = n * 10 + (d - 1)
+  for (const d of dice) n = n * 10 + dieDigit(d)
   return n
 }
 

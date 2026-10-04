@@ -22,6 +22,14 @@ const { t } = useI18n()
 
 const pcRoles = computed(() => props.roles.filter((r) => r.kind === 'pc'))
 const kpRole = computed(() => props.roles.find((r) => r.kind === 'kp'))
+
+/** 骰面 → 数字位（10=0）→ 本轮场景结束翻到的页：让玩家随时能看懂骰子的含义 */
+function deriveOf(roleId: RoleId): { digits: string; page: number } | null {
+  const dice = props.lastDice[roleId]
+  const roll = props.rolls[roleId]
+  if (!dice || dice.length === 0 || !roll) return null
+  return { digits: dice.map((d) => d % 10).join(''), page: roll.nextPageIndex + 1 }
+}
 </script>
 
 <template>
@@ -35,6 +43,9 @@ const kpRole = computed(() => props.roles.find((r) => r.kind === 'kp'))
       <div class="kw-body">
         <span class="dice-row">
           <span v-for="(d, i) in lastDice[role.id] ?? []" :key="i" class="die">{{ d }}</span>
+          <span v-if="deriveOf(role.id)" class="dice-derive">
+            {{ deriveOf(role.id)!.digits }} → {{ t('nextFlipPage', { n: deriveOf(role.id)!.page }) }}
+          </span>
         </span>
         <span class="kw-tags">
           <el-tag
@@ -67,6 +78,9 @@ const kpRole = computed(() => props.roles.find((r) => r.kind === 'kp'))
       <div class="kw-body">
         <span class="dice-row">
           <span v-for="(d, i) in lastDice[kpRole.id] ?? []" :key="i" class="die">{{ d }}</span>
+          <span v-if="deriveOf(kpRole.id)" class="dice-derive">
+            {{ deriveOf(kpRole.id)!.digits }} → {{ t('nextFlipPage', { n: deriveOf(kpRole.id)!.page }) }}
+          </span>
         </span>
         <span v-if="kpHidden" class="kw-tags">
           <el-tag v-for="i in (keywords[kpRole.id] ?? []).length" :key="i" size="large" class="kw-tag kw-mask">？</el-tag>

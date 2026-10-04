@@ -205,7 +205,7 @@ export class GameEngine {
   /**
    * 主循环：掷轮 → 场景开场 → 行动循环 → 自然收尾翻页 → 下一轮。
    * startWithRoll=false 用于存档恢复（跳过本轮掷骰与开场，直接续行动循环）。
-   * 重骰 = 回滚到本轮开始（doReroll）→ 重掷 → 新开场。
+   * 重骰 = 回滚并跳过本轮（doReroll 翻到骰面指示页）→ 新页重掷 → 新开场。
    */
   private async mainLoop(startWithRoll: boolean): Promise<void> {
     while (!this.stopped) {
@@ -499,7 +499,10 @@ export class GameEngine {
     return true
   }
 
-  /** 回滚到本轮开始并交还主循环重掷（rollRound 会重新掷骰并重建回滚点） */
+  /**
+   * 兑现全体同意的重骰：回滚到本轮开始，然后**跳过本轮**——
+   * 翻到本轮骰面组合指示的页（pendingNextPages），主循环随后在新页重掷取词。
+   */
   private doReroll(): void {
     const cp = this.checkpoint
     if (cp) {
@@ -512,7 +515,18 @@ export class GameEngine {
     this.sceneEnded = false
     this.rerollApproved = false
     this.resume = null
-    this.addLog({ type: 'system', round: this.round, text: `全体同意重骰，第 ${this.round} 轮场景重来。` })
+    for (const c of this.controllers) {
+      const next = this.pendingNextPages[c.role.id]
+      const prev = this.pages[c.role.id]
+      this.pages[c.role.id] = next
+      this.emit({ type: 'flip', roleId: c.role.id, pageIndex: next, nextPage: next !== prev })
+    }
+    this.addLog({
+      type: 'system',
+      round: this.round,
+      text: `全体同意重骰：跳过第 ${this.round} 轮场景，翻到骰面指示的页后重掷。`,
+    })
+    this.round += 1
     this.emit({ type: 'mutated' })
   }
 

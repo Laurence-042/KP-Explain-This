@@ -114,11 +114,12 @@ export function pageText(doc: BookDocument, pageIndex: number): string {
 
 /**
  * 骰面 → 页内词位映射：每个骰子把页面分成 10 档，
- * die 落在 (die-1)/10 档的起点，再偏移骰子序号避免同点数挤在同一位置。
+ * die 落在 (die%10)/10 档的起点（与页码位约定一致：面 10 = 第 0 档），
+ * 再偏移骰子序号避免同点数挤在同一位置。
  */
 export function dieToWordIndex(pageLen: number, dieValue: number, dieIndex: number): number {
   if (pageLen <= 0) return 0
-  const pos = Math.floor(((dieValue - 1) / 10) * pageLen) + dieIndex
+  const pos = Math.floor(((dieValue % 10) / 10) * pageLen) + dieIndex
   return Math.min(pageLen - 1, Math.max(0, pos))
 }
 

@@ -118,10 +118,11 @@ describe('nearestValidPage', () => {
 })
 
 describe('dieToWordIndex', () => {
-  it('骰面映射到页内档位并叠加骰子序号', () => {
-    expect(dieToWordIndex(300, 1, 0)).toBe(0)
-    expect(dieToWordIndex(300, 10, 2)).toBe(272)
-    expect(dieToWordIndex(5, 10, 2)).toBe(4)
+  it('骰面映射到页内档位（面 10 = 第 0 档）并叠加骰子序号', () => {
+    expect(dieToWordIndex(300, 1, 0)).toBe(30)
+    expect(dieToWordIndex(300, 10, 2)).toBe(2)
+    expect(dieToWordIndex(300, 7, 1)).toBe(211)
+    expect(dieToWordIndex(5, 10, 2)).toBe(2)
   })
 })
 
@@ -153,7 +154,7 @@ describe('pickKeywordOnPage', () => {
     used.add(p1.keyword.toLowerCase())
     const p2 = pickKeywordOnPage(twoPages, 0, 5, 1, used)
     used.add(p2.keyword.toLowerCase())
-    const p3 = pickKeywordOnPage(twoPages, 0, 10, 2, used)
+    const p3 = pickKeywordOnPage(twoPages, 0, 4, 2, used)
     expect(p1.keyword).toBe('knife')
     expect(p1.pageIndex).toBe(0)
     expect(p2.keyword).toBe('debt')

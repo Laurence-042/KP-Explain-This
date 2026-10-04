@@ -475,15 +475,7 @@ body {
   border-radius: 4px;
   padding: 1px 3px;
   font-weight: 600;
-  position: relative;
   box-shadow: 0 0 0 1px rgba(161, 98, 7, 0.35);
-}
-
-.hit-die {
-  font-size: 10px;
-  color: #dc2626;
-  font-weight: 700;
-  margin-right: 2px;
 }
 
 /* ===== 关键词条 ===== */
@@ -580,6 +572,20 @@ body {
   font-weight: 700;
   font-size: 14px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+/* 骰面推导：位数（10=0）→ 场景结束翻到的页 */
+.dice-derive {
+  align-self: center;
+  margin-left: 6px;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+  color: #64748b;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 2px 8px;
+  white-space: nowrap;
 }
 
 /* ===== 掷骰 overlay：实体书舞台 ===== */
@@ -743,8 +749,36 @@ body {
 .stage-die {
   position: absolute;
   z-index: 5;
+  width: 44px;
+  height: 44px;
+}
+
+.stage-cube {
   filter: drop-shadow(6px 14px 10px rgba(0, 0, 0, 0.45));
   animation: die-land 0.8s cubic-bezier(0.28, 0.7, 0.35, 1.18) both;
+}
+
+/* 骰子下方标注其数字位（面 10 = 0），落定后弹出 */
+.die-digit {
+  position: absolute;
+  top: 47px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: 9px;
+  color: #fef3c7;
+  background: rgba(30, 41, 59, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  white-space: nowrap;
+  animation: digit-pop 0.3s ease both;
+}
+
+@keyframes digit-pop {
+  from { opacity: 0; transform: translateX(-50%) scale(0.5); }
+  to { opacity: 1; transform: translateX(-50%) scale(1); }
 }
 
 @keyframes die-land {
@@ -802,10 +836,46 @@ body {
   to { opacity: 1; transform: scale(1); }
 }
 
-.stage-next {
-  font-size: 14px;
-  letter-spacing: 0.12em;
-  color: #cbd5e1;
+/* 骰面 → 组合数 → 取模 → 页码 的推导算式 */
+.stage-math {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  animation: kw-pop 0.4s ease both;
+}
+
+.math-step {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 15px;
+  color: #e2e8f0;
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 8px;
+  padding: 4px 10px;
+  letter-spacing: 0.06em;
+}
+
+.math-arrow {
+  color: #fbbf24;
+  font-weight: 800;
+  font-size: 15px;
+}
+
+.math-page {
+  font-size: 15px;
+  font-weight: 800;
+  color: #fef3c7;
+  background: linear-gradient(135deg, rgba(180, 83, 9, 0.55), rgba(120, 53, 15, 0.55));
+  border: 1px solid rgba(251, 191, 36, 0.5);
+  border-radius: 8px;
+  padding: 4px 12px;
+}
+
+.stage-mapped {
+  font-size: 12px;
+  color: #fca5a5;
   animation: kw-pop 0.4s ease both;
 }
 
