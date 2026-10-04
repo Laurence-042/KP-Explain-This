@@ -25,7 +25,7 @@ GameEngine（纯编排，validator 为系统服务）
    ├─ kpAct: KP 输出（markdown 叙事 + ```json state_changes``` 围栏）
    │    → json-out.parseKpOutput 容错拆分 → world 清洗合并 → scene_end 检测
    ├─ collectValidatedAction: PC 行动 → Validator（无状态，上下文每次重建）
-   │    → verdictPass（valid && 全关键词 && 世界一致）→ 通过才转 KP
+   │    → verdictPass（全关键词使用 && 世界一致；不参考 valid 聚合字段）→ 通过才转 KP
    ├─ scene_end=true → finishScene 自动翻页 → 下一轮（没有手动结束入口）
    └─ requestReroll: 全体同意（LLM KP 恒同意）→ doReroll 回滚 world/log/控制器历史
         → **跳过本轮**（翻到 pendingNextPages 骰面指示页）→ 新页重掷重开
@@ -46,7 +46,7 @@ GameEngine（纯编排，validator 为系统服务）
 ## 约定
 
 - 随机数只走 `core/randomizer.ts`（crypto + 拒绝采样），LLM 永远不允许产生随机结果。
-- Validator 判定标准是**宽松即兴标准**（用户产品决策，覆盖 story.md 早期的严格原则）：这是 improv 游戏，任何回应形式（含纯内心独白）都合法；关键词在行动/对话/观察/心理/联想/情绪中实质展开即算使用；世界一致性只拦硬性违规（凭空获得物品/能力、瞬移、否认既定事实、替 KP/NPC 做重大决定），主观感受与想象交给 KP 裁决——只有明显违规才驳回。改 Validator prompt 前先重读 `prompts.ts` 现行版本，不要向严格方向回调。
+- Validator 判定标准是**宽松即兴标准**（用户产品决策，两轮校准，覆盖 story.md 早期的严格原则）：这是 improv 游戏，任何回应形式（含纯内心独白）都合法；关键词字面出现或任何相关展开（同义/翻译/指代/联想）即算使用，唯一 false 情形是"完全无痕迹"；世界一致性只拦硬性违规（凭空获得物品/能力、瞬移、否认既立事实、替 KP/NPC 做重大决定），主观感受与想象交给 KP 裁决。宽松标准不止靠 prompt——`validator.ts` 有三处代码兜底：关键词字面出现在行动文本中强制算使用（大小写不敏感）、模型未判定的关键词视为已使用、`verdictPass` 不参考 `valid` 聚合字段（模型常把它填得比自己的明细更严）。改这些前先重读现行实现，不要向严格方向回调。
 - 演出是需求本体而非装饰：掷骰演出必须呈现"实体书 + 骰子落在真实词位上"（DiceOverlay 渲染封皮/内页/书脊，测量 `[data-land]` 标记位置后绝对定位骰子），不接受抽象化替代。
 - LLM 输出一律视为不可信输入：JSON 经 `json-out.ts` 容错解析 + `world.ts` 清洗（含 `state_changes` 嵌套解包）后才进入 WorldState；未知字段丢弃并产生 warning 日志。
 - 验收参考 story.md「验收标准」；新增玩法逻辑先在 `src/core/*.test.ts` 补测试（引擎集成测试注入真实 HumanController + monkeypatch 的 `LLMClient.stream/complete`，见 `engine.test.ts`，已含双 PC/重骰回滚/中断恢复/快照续跑用例）。
