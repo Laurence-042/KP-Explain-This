@@ -19,6 +19,8 @@ const messages = {
     maxTokensHint: '留空则由服务端默认值决定',
     copied: '已复制',
     copyFailed: '复制失败，请手动复制',
+    copyApiKey: '复制 API Key',
+    apiKeyCopied: 'API Key 已复制',
 
     // 请求失败 / 诊断
     requestFailed: '请求失败',

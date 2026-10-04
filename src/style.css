@@ -337,20 +337,33 @@ body {
   margin-bottom: 8px;
 }
 
+/* 侧栏书页：实体书外观（皮面边框 + 书脊 + 书口页叠） */
 .book-view {
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  background: #fffdf5;
-  overflow: hidden;
+  position: relative;
+  border-radius: 3px 12px 12px 3px;
+  background: linear-gradient(to bottom, #5d3a1c, #43290f);
+  padding: 7px 11px 7px 10px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+}
+
+.book-view::after {
+  content: '';
+  position: absolute;
+  right: -7px;
+  top: 8px;
+  bottom: 8px;
+  width: 7px;
+  background: repeating-linear-gradient(to bottom, #f7f0dc 0 2px, #cbb98c 2px 3px);
+  border-radius: 0 3px 3px 0;
+  pointer-events: none;
 }
 
 .book-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid #eee7d0;
-  background: #faf6e9;
+  padding: 8px 12px 6px 20px;
+  background: transparent;
   font-size: 13px;
 }
 
@@ -379,12 +392,15 @@ body {
   position: relative;
   height: 420px;
   overflow: auto;
-  padding: 16px;
+  padding: 14px 16px 14px 22px;
   font-size: 14px;
   line-height: 1.9;
   text-align: justify;
   color: #44403c;
-  transition: filter 0.3s ease, transform 0.3s ease, opacity 0.3s ease;
+  background: #fffdf5;
+  border-radius: 2px 8px 8px 2px;
+  box-shadow: inset 3px 0 10px rgba(74, 44, 20, 0.22);
+  transition: filter 0.3s ease, opacity 0.3s ease;
 }
 
 .book-page-body.flipping {
@@ -566,89 +582,177 @@ body {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
-/* ===== 掷骰 overlay ===== */
+/* ===== 掷骰 overlay：实体书舞台 ===== */
 
 .dice-overlay {
   position: fixed;
   inset: 0;
   z-index: 3000;
-  background: rgba(15, 23, 42, 0.55);
-  backdrop-filter: blur(3px);
+  background: radial-gradient(ellipse at center, rgba(30, 27, 45, 0.78), rgba(10, 10, 18, 0.92));
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
 }
 
-.dice-overlay-card {
-  background: #fff;
-  border-radius: 18px;
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
-  padding: 26px 36px 18px;
-  min-width: min(480px, 92vw);
-  max-width: 92vw;
-  text-align: center;
+.stage-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  animation: stage-in 0.45s ease both;
 }
 
-.dice-overlay-title {
-  font-size: 15px;
+@keyframes stage-in {
+  from { opacity: 0; transform: translateY(26px) scale(0.94); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.stage-role {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.stage-note {
+  font-size: 13px;
+  color: #a5b4fc;
+  letter-spacing: 0.2em;
+}
+
+/* 实体书：纸张 + 书脊 + 书口（右侧页叠） */
+.stage-book {
+  position: relative;
+  width: min(680px, 92vw);
+  min-height: 400px;
+  max-height: 62vh;
+  background: #fffdf3;
+  border-radius: 3px 12px 12px 3px;
+  box-shadow:
+    0 30px 70px rgba(0, 0, 0, 0.55),
+    inset 0 0 60px rgba(120, 90, 40, 0.08);
+  border: 1px solid #d9caa2;
+  perspective: 900px;
+}
+
+.stage-spine {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 30px;
+  background: linear-gradient(to right, #4a2c14 0%, #6b4423 30%, rgba(74, 44, 20, 0.25) 70%, transparent 100%);
+  border-radius: 3px 0 0 3px;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.stage-edge {
+  position: absolute;
+  right: -9px;
+  top: 5px;
+  bottom: 5px;
+  width: 9px;
+  background: repeating-linear-gradient(to bottom, #f7f0dc 0 3px, #cbb98c 3px 4px);
+  border-radius: 0 4px 4px 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.stage-page {
+  padding: 30px 34px 26px 52px;
+  font-size: 13px;
+  line-height: 2.1;
+  text-align: justify;
+  color: #43382b;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+/* 命中词：骰子落下瞬间点亮 */
+.stage-hit {
+  position: relative;
   font-weight: 700;
-  color: #475569;
-  letter-spacing: 0.35em;
-  margin-bottom: 16px;
+  color: #43382b;
+  animation: land-hit 0.5s ease both;
 }
 
-.dice-entry {
-  animation: dice-entry-in 0.4s ease both;
-  padding: 10px 0;
-  border-bottom: 1px dashed #e2e8f0;
+@keyframes land-hit {
+  0% { background: transparent; }
+  55% { background: #fbbf24; box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.55); }
+  100% { background: #fde68a; box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.5); }
 }
 
-.dice-entry:last-of-type {
-  border-bottom: none;
+/* 合书初掷：封皮 */
+.stage-book.closed .stage-cover {
+  min-height: 400px;
 }
 
-@keyframes dice-entry-in {
-  from { opacity: 0; transform: translateY(14px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.dice-entry-head {
+.stage-cover {
+  min-height: inherit;
+  height: 100%;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.06), transparent 40%),
+    linear-gradient(to bottom, #5d3a1c, #3f2410);
+  border-radius: 3px 12px 12px 3px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  margin-bottom: 12px;
+  animation: cover-in 0.5s ease both;
 }
 
-.dice-entry-note {
-  font-size: 12px;
-  color: #94a3b8;
+@keyframes cover-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-.dice-cubes {
-  display: flex;
-  justify-content: center;
-  gap: 26px;
-  height: 56px;
-  perspective: 700px;
-  margin-bottom: 12px;
+.stage-cover-frame {
+  border: 2px solid rgba(212, 175, 55, 0.75);
+  outline: 1px solid rgba(212, 175, 55, 0.35);
+  outline-offset: 5px;
+  border-radius: 6px;
+  padding: 44px 56px;
+  text-align: center;
+  max-width: 78%;
 }
 
-/* 3D 骰子：六面立方体翻滚落定，正面即点数 */
+.stage-cover-title {
+  font-family: 'STZhongsong', 'SimSun', serif;
+  font-size: 30px;
+  letter-spacing: 0.14em;
+  color: #e7d9a8;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  word-break: break-word;
+}
+
+.stage-cover-dice-note {
+  margin-top: 16px;
+  font-size: 13px;
+  letter-spacing: 0.3em;
+  color: rgba(231, 217, 168, 0.65);
+}
+
+/* 3D 骰子：从空中翻滚落在词上 */
 .die3d {
   position: relative;
   width: 44px;
   height: 44px;
   transform-style: preserve-3d;
-  animation: die3d-tumble 1.05s cubic-bezier(0.22, 0.9, 0.28, 1.05) both;
 }
 
-@keyframes die3d-tumble {
-  0% { transform: rotateX(0deg) rotateY(0deg) scale(0.3); opacity: 0; }
-  35% { transform: rotateX(250deg) rotateY(190deg) scale(1.12); opacity: 1; }
-  70% { transform: rotateX(400deg) rotateY(340deg) scale(0.98); }
-  100% { transform: rotateX(360deg) rotateY(360deg) scale(1); }
+.stage-die {
+  position: absolute;
+  z-index: 5;
+  filter: drop-shadow(6px 14px 10px rgba(0, 0, 0, 0.45));
+  animation: die-land 0.8s cubic-bezier(0.28, 0.7, 0.35, 1.18) both;
+}
+
+@keyframes die-land {
+  0% { transform: translateY(-52vh) translateX(14px) rotateX(400deg) rotateY(280deg) scale(0.55); opacity: 0; }
+  45% { opacity: 1; }
+  72% { transform: translateY(5px) rotateX(719deg) rotateY(735deg) scale(1.06); }
+  /* 落定带轻微倾角：顶面与侧面微露，保留立方体感 */
+  100% { transform: translateY(0) rotateX(716deg) rotateY(738deg) scale(1); }
 }
 
 .die3d-face {
@@ -673,12 +777,18 @@ body {
 .die3d-face[data-face='4'] { transform: rotateX(90deg) translateZ(22px); }
 .die3d-face[data-face='5'] { transform: rotateX(-90deg) translateZ(22px); }
 
-.dice-keywords {
+.stage-caption {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.stage-kws {
   display: flex;
   justify-content: center;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
-  min-height: 34px;
 }
 
 .dice-kw {
@@ -692,16 +802,16 @@ body {
   to { opacity: 1; transform: scale(1); }
 }
 
-.dice-next {
-  margin-top: 10px;
-  font-size: 13px;
-  color: #64748b;
+.stage-next {
+  font-size: 14px;
+  letter-spacing: 0.12em;
+  color: #cbd5e1;
+  animation: kw-pop 0.4s ease both;
 }
 
 .dice-overlay-hint {
-  margin-top: 12px;
   font-size: 12px;
-  color: #cbd5e1;
+  color: rgba(203, 213, 225, 0.55);
 }
 
 .dice-fade-enter-active,

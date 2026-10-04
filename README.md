@@ -11,7 +11,7 @@
 ```
 导入 TXT / PDF → 合书初掷（定初始页，掷骰动画）
   ↓
-每轮：在打开的书页上掷 K 个 1d10（3D 掷骰动画）
+每轮：在打开的书页上掷 K 个 1d10（全屏演出：带封皮/书脊/内页的实体书，骰子落定在被砸中的词上）
   ├─ 骰子盖住的词 = 本轮关键词（PC 一组 / KP 一组）
   └─ 骰面按个/十/百位组合（≈ 一次 1d10^K）mod 总页数 = 本轮结束后翻到的页（翻页动画）
   ↓
@@ -19,7 +19,7 @@ KP LLM 用 KP 关键词生成场景（流式叙事）
   ↓
 玩家用 PC 关键词描述行动
   ↓
-Validator LLM 独立判定（关键词是否真正影响行动？是否符合世界状态？）
+Validator LLM 独立判定（宽松即兴标准：关键词实质展开即可，只拦硬性世界违规）
   ├─ 驳回 → 玩家修改重交（KP 全程不知情）
   └─ 通过 → KP 推进剧情，输出 叙事 + 结构化 state_changes
   ↓
@@ -28,7 +28,7 @@ KP 判定场景自然收尾（scene_end）→ 自动翻页 → 下一轮
     需全体角色同意——LLM KP 默认同意——回滚本轮世界状态与剧情后重掷重开）
 ```
 
-**关键设计**：KP 与 Validator 是两个完全独立的 LLM Session（可分别配置不同模型/温度/端点）。KP 为了剧情流畅会替玩家"圆解释"，Validator 则被明确要求**不替玩家补全未表达的关联**——这是整个规则成立的基石。世界状态（地点/物品/NPC/事实）以结构化 JSON 维护，不依赖聊天记录。
+**关键设计**：KP 与 Validator 是两个完全独立的 LLM Session（可分别配置不同模型/温度/端点）。Validator 按**宽松即兴标准**判定——这是即兴游戏，内心独白、对话、观察、联想都算合法回应，关键词实质展开即可，只有凭空获得物品、瞬移、否认既定事实这类硬性世界违规才会驳回。世界状态（地点/物品/NPC/事实）以结构化 JSON 维护，不依赖聊天记录。
 
 ## 快速开始
 
@@ -66,8 +66,8 @@ src/
 │       ├── client.ts      # OpenAI 兼容传输：SSE 流式/非流式 + abort + 诊断脱敏
 │       └── session.ts     # LLMSession：独立参数/历史/滚动摘要
 ├── composables/           # useConfig(双连接) useModels useBooks(pdfjs+IndexedDB) useGame(控制器桥)
-└── components/            # SetupPanel / KeywordsBar / BookView(翻页动画) / GameChat /
-                            # ActionComposer(重骰/中止) / DiceOverlay(3D掷骰) / WorldStateDrawer …
+└── components/            # SetupPanel / KeywordsBar / BookView(实体书+翻页动画) / GameChat /
+                            # ActionComposer(重骰/中止) / DiceOverlay(实体书掷骰演出：骰子落在词上) / WorldStateDrawer …
 ```
 
 - **RoleController 同基类**（story 核心要求）：`requestAction / requestRerollConsent / onApplied / onRejected / sceneCheckpoint / sceneRestore / abort`。引擎只面向该接口编排，不关心背后是人类输入框、LLM 会话还是未来的网络玩家；引擎测试中注入两个 HumanController 即验证了双真人 PC 顺序行动。
@@ -77,7 +77,7 @@ src/
 
 ## MVP 范围
 
-已做：TXT+PDF 导入、随机取词（PC+KP 关键词）、KP/Validator 双 Session、基础 World State、单玩家（多 PC 架构就绪）、文本聊天、BYOK、存档/恢复、掷骰/翻页动画、全体同意重骰。
+已做：TXT+PDF 导入、随机取词（PC+KP 关键词）、KP/Validator 双 Session、基础 World State、单玩家（多 PC 架构就绪）、文本聊天、BYOK、存档/恢复、实体书掷骰演出/翻页动画、全体同意重骰。
 
 未做（见 story.md）：PDF 二维坐标骰子落点、多人联机、语音、角色卡、地图、长期记忆压缩、多 Agent NPC。
 

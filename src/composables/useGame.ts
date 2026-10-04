@@ -38,15 +38,29 @@ export type StartSetup = {
   pageWords: number
 }
 
+export type DiceLandPick = {
+  dieIndex: number
+  keyword: string
+  /** 命中词在页文本内的偏移（跨页兜底命中时 offset 无效，由组件放底部） */
+  onPage: boolean
+  offset: number
+  length: number
+}
+
 export type DiceOverlayEntry = {
   roleId: RoleId
   roleName: string
   isKp: boolean
+  bookName: string
   dice: number[]
   keywords: string[]
+  /** 骰子落下的当前页文本（初掷为空：骰子落在封皮上） */
+  pageText: string
+  /** 每个骰子的落词信息 */
+  lands: DiceLandPick[]
   nextPage: number
   totalPages: number
-  /** 合书初掷：只有目标页，没有关键词 */
+  /** 合书初掷：骰子落在封皮上，只有目标页 */
   init: boolean
 }
 
@@ -143,7 +157,8 @@ export function useGame(config: UseConfig) {
     ElMessage.error(t('requestFailed'))
   }
 
-  // ── 骰子 overlay：roll 事件进入，最后一条后落定、自动关闭 ──
+  // ── 骰子 overlay：roll 事件进入；600ms 无新骰即视为本轮掷完，
+  //    组件按每个角色 ~3.6s 依次演出，这里只做兜底关闭 ──
 
   function pushOverlayEntry(entry: DiceOverlayEntry): void {
     const state = diceOverlay.value
@@ -152,10 +167,9 @@ export function useGame(config: UseConfig) {
     if (overlaySettleTimer) clearTimeout(overlaySettleTimer)
     if (overlayCloseTimer) clearTimeout(overlayCloseTimer)
     overlaySettleTimer = setTimeout(() => {
-      // 600ms 无新骰子 → 视为本轮掷完，再延时关闭（留出阅读时间）
       overlayCloseTimer = setTimeout(() => {
         diceOverlay.value = { visible: false, entries: [] }
-      }, 2600)
+      }, 600 + next.entries.length * 3600)
     }, 600)
   }
 
@@ -187,12 +201,16 @@ export function useGame(config: UseConfig) {
       case 'init-roll': {
         lastDice.value = { ...lastDice.value, [e.roleId]: e.dice }
         const role = engine?.controllers.find((c) => c.role.id === e.roleId)?.role
+        const book = role ? bookDocs[role.bookId] : undefined
         pushOverlayEntry({
           roleId: e.roleId,
           roleName: role?.name ?? e.roleId,
           isKp: role?.kind === 'kp',
+          bookName: book?.name ?? '',
           dice: e.dice,
           keywords: [],
+          pageText: '',
+          lands: [],
           nextPage: e.pageIndex,
           totalPages: totalPagesOf(e.roleId),
           init: true,
@@ -202,12 +220,23 @@ export function useGame(config: UseConfig) {
       case 'roll': {
         lastDice.value = { ...lastDice.value, [e.roleId]: e.roll.dice }
         const role = engine?.controllers.find((c) => c.role.id === e.roleId)?.role
+        const book = role ? bookDocs[role.bookId] : undefined
+        const currentPage = engine?.pages[e.roleId] ?? 0
         pushOverlayEntry({
           roleId: e.roleId,
           roleName: role?.name ?? e.roleId,
           isKp: role?.kind === 'kp',
+          bookName: book?.name ?? '',
           dice: e.roll.dice,
           keywords: e.roll.picks.map((p) => p.keyword),
+          pageText: book?.pages[currentPage]?.text ?? '',
+          lands: e.roll.picks.map((p) => ({
+            dieIndex: p.dieIndex,
+            keyword: p.keyword,
+            onPage: p.pageIndex === currentPage,
+            offset: p.offset,
+            length: p.length,
+          })),
           nextPage: e.roll.nextPageIndex,
           totalPages: totalPagesOf(e.roleId),
           init: false,

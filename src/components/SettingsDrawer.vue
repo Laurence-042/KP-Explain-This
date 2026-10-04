@@ -24,6 +24,17 @@ function copyKpConnection() {
   ElMessage.success(t('kpConnectionCopied'))
   void validatorModels.fetchModels()
 }
+
+/** API Key 保持隐藏显示，但允许一键复制（会用 Key 的用户知道自己要做什么） */
+async function copyApiKey(value: string) {
+  if (!value) return
+  try {
+    await navigator.clipboard.writeText(value)
+    ElMessage.success(t('apiKeyCopied'))
+  } catch {
+    ElMessage.error(t('copyFailed'))
+  }
+}
 </script>
 
 <template>
@@ -43,7 +54,11 @@ function copyKpConnection() {
           <el-input v-model="config.form.kp.baseUrl" placeholder="https://api.example.com/v1" />
         </el-form-item>
         <el-form-item label="API Key">
-          <el-input v-model="config.form.kp.apiKey" type="password" show-password />
+          <el-input v-model="config.form.kp.apiKey" type="password" show-password>
+            <template #append>
+              <el-button :icon="CopyDocument" :title="t('copyApiKey')" @click="copyApiKey(config.form.kp.apiKey)" />
+            </template>
+          </el-input>
         </el-form-item>
         <el-form-item :label="t('model')">
           <div class="model-row">
@@ -90,7 +105,11 @@ function copyKpConnection() {
           <el-input v-model="config.form.validator.baseUrl" placeholder="https://api.example.com/v1" />
         </el-form-item>
         <el-form-item label="API Key">
-          <el-input v-model="config.form.validator.apiKey" type="password" show-password />
+          <el-input v-model="config.form.validator.apiKey" type="password" show-password>
+            <template #append>
+              <el-button :icon="CopyDocument" :title="t('copyApiKey')" @click="copyApiKey(config.form.validator.apiKey)" />
+            </template>
+          </el-input>
         </el-form-item>
         <el-form-item :label="t('model')">
           <div class="model-row">

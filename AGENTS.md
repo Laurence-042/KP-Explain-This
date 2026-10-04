@@ -45,6 +45,7 @@ GameEngine（纯编排，validator 为系统服务）
 ## 约定
 
 - 随机数只走 `core/randomizer.ts`（crypto + 拒绝采样），LLM 永远不允许产生随机结果。
-- Validator 语境相关 prompt 修改要格外克制：它的"不替玩家补全关联"规则是玩法成立的基石（见 story.md「Prompt 原则」）。
+- Validator 判定标准是**宽松即兴标准**（用户产品决策，覆盖 story.md 早期的严格原则）：这是 improv 游戏，任何回应形式（含纯内心独白）都合法；关键词在行动/对话/观察/心理/联想/情绪中实质展开即算使用；世界一致性只拦硬性违规（凭空获得物品/能力、瞬移、否认既定事实、替 KP/NPC 做重大决定），主观感受与想象交给 KP 裁决——只有明显违规才驳回。改 Validator prompt 前先重读 `prompts.ts` 现行版本，不要向严格方向回调。
+- 演出是需求本体而非装饰：掷骰演出必须呈现"实体书 + 骰子落在真实词位上"（DiceOverlay 渲染封皮/内页/书脊，测量 `[data-land]` 标记位置后绝对定位骰子），不接受抽象化替代。
 - LLM 输出一律视为不可信输入：JSON 经 `json-out.ts` 容错解析 + `world.ts` 清洗（含 `state_changes` 嵌套解包）后才进入 WorldState；未知字段丢弃并产生 warning 日志。
 - 验收参考 story.md「验收标准」；新增玩法逻辑先在 `src/core/*.test.ts` 补测试（引擎集成测试注入真实 HumanController + monkeypatch 的 `LLMClient.stream/complete`，见 `engine.test.ts`，已含双 PC/重骰回滚/中断恢复/快照续跑用例）。
