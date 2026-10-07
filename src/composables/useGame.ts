@@ -163,6 +163,10 @@ export function useGame(config: UseConfig) {
     keywords.value = { ...engine.keywords }
     pages.value = { ...engine.pages }
     rolls.value = JSON.parse(JSON.stringify(engine.rolls))
+    // 骰面可从 rolls 派生：存档恢复没有掷骰事件，必须在这里重建（否则骰子行/推导 chip 消失）
+    lastDice.value = Object.fromEntries(
+      Object.entries(engine.rolls).map(([id, r]) => [id, r?.dice ?? []]),
+    )
     log.value = [...engine.log]
     world.value = JSON.parse(JSON.stringify(engine.world))
     sceneEndHint.value = engine.sceneEndHint
