@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { GameEngine, type EngineEvent } from './engine'
 import { LLMClient, type ChatParams } from './llm/client'
 import { LLMSession } from './llm/session'
-import { HumanController, LlmKpController, type RoleController } from './controller'
+import { HumanController, LlmKpController, LlmPcController, type RoleController } from './controller'
 import { parseTxt } from './book'
 import type { RoleDef } from './types'
 
@@ -352,5 +352,201 @@ describe('GameEngine：快照恢复', () => {
     expect(engine2.currentSceneNarrative).toContain('不该亮着的灯')
     expect(engine2.canRequestReroll).toBe(true)
     engine2.stop()
+  })
+})
+
+describe('GameEngine：LLM PC（控制器三变种的 LLM-PC 形态）', () => {
+  const PC_ACTION = '我警惕地退到门边，压低呼吸观察债主的方向。'
+
+  /** KP+LLM PC 双人对局（无人类）：pcClient 可编程回复，validator 默认全过 */
+  function makeLlmPcGame(kpReplies: string[]) {
+    const mocks = makeMocks()
+    mocks.setKpReplies(kpReplies)
+
+    const kpRole: RoleDef = { id: 'kp', name: 'KP', kind: 'kp', controller: 'llm', bookId: 'b1' }
+    const pcRole: RoleDef = {
+      id: 'pc-llm-1',
+      name: '玩家B',
+      kind: 'pc',
+      controller: 'llm',
+      bookId: 'b1',
+    }
+
+    const kpSession = new LLMSession(mocks.kpClient, { model: 'kp-model', temperature: 0.8 })
+    const validatorSession = new LLMSession(mocks.validatorClient, { model: 'v-model', temperature: 0.1 })
+    const pcSession = new LLMSession(mocks.validatorClient, { model: 'pc-model', temperature: 0.8 })
+    // pcSession 单独一个 client（与 validator 实例区分开）
+    const pcClient = new LLMClient('http://fake/v1', 'key')
+    pcSession.client = pcClient
+
+    const pcReplies: string[] = []
+    let pcReplyIndex = 0
+    ;(pcClient as unknown as Record<string, unknown>).complete = async () => {
+      // 让出事件循环：无人类玩家的循环若全是即时微任务，会饿死计时器（waitFor 卡死）
+      await new Promise((r) => setTimeout(r, 1))
+      const reply = pcReplies[pcReplyIndex] ?? PC_ACTION
+      pcReplyIndex++
+      return reply
+    }
+
+    const events: EngineEvent[] = []
+    const engine = new GameEngine(validatorSession, (e) => events.push(e))
+    const kp = new LlmKpController(kpRole, kpSession)
+    const llmPc = new LlmPcController(pcRole, pcSession)
+    const books = { b1: parseTxt('b1', '测试书', bookText) }
+
+    const startIt = () => {
+      void engine.start([kp, llmPc] as never, engine.validatorSession, books as never, 3).catch(() => {})
+    }
+    /** 断言失败也要停引擎：纯 LLM 对局会无限推进，绝不能让引擎失控泄漏到后续用例 */
+    const stop = () => engine.stop()
+    return { engine, kpSession, pcSession, pcClient, events, mocks, pcReplies, startIt, stop }
+  }
+
+  it('LLM PC 自主行动 → 验证通过 → KP 以其名义推进', async () => {
+    const ctx = makeLlmPcGame([KP_SCENE_REPLY, KP_RESOLVE_END_REPLY])
+    try {
+      ctx.startIt()
+      // 场景收尾的叙事是稳定标记（location 会被下一轮开场改回，不能用）
+      await waitFor(() =>
+        ctx.engine.log.some((l) => l.type === 'scene' && l.narrative.includes('结束了')),
+      )
+
+      const actionEntry = ctx.engine.log.find((l) => l.type === 'action')
+      expect(actionEntry?.roleName).toBe('玩家B')
+      expect(actionEntry?.text).toBe(PC_ACTION)
+      // KP 收到的已验证行动携带角色名
+      const resolveUser = ctx.kpSession.messages.find(
+        (m) => m.role === 'user' && m.content.includes('已通过 Validator 验证'),
+      )
+      expect(resolveUser?.content).toContain('玩家B')
+      expect(resolveUser?.content).toContain(PC_ACTION)
+      // PC 请求里携带场景叙述
+      expect(ctx.pcSession.messages[0].content).toContain('雪夜')
+      // UI 事件：生成前后有 pc-acting 标记
+      expect(ctx.events.some((e) => e.type === 'pc-acting' && e.active)).toBe(true)
+      expect(ctx.events.some((e) => e.type === 'pc-acting' && !e.active)).toBe(true)
+    } finally {
+      ctx.stop()
+    }
+  })
+
+  it('被驳回 → 自动带理由重写 → 通过', async () => {
+    const ctx = makeLlmPcGame([KP_SCENE_REPLY, KP_RESOLVE_REPLY])
+    // 第一版行动被驳回（某关键词 false），之后放行
+    let first = true
+    ;(ctx.mocks.validatorClient as unknown as Record<string, unknown>).complete = async (params: ChatParams) => {
+      const user = [...params.messages].reverse().find((m) => m.role === 'user')?.content ?? ''
+      const kwBlock = user.match(/玩家关键词[\s\S]*?(?=## 玩家行动)/)?.[0] ?? ''
+      const kws = [...kwBlock.matchAll(/^- (.+)$/gm)].map((m) => m[1])
+      const usage: Record<string, boolean> = {}
+      kws.forEach((k, i) => (usage[k] = !first || i > 0))
+      const verdict = { valid: !first, keyword_usage: usage, world_consistent: true, reason: first ? '关键词无痕迹' : 'ok' }
+      first = false
+      return JSON.stringify(verdict)
+    }
+    ctx.pcReplies.push('我躲在角落发抖。', '我重新观察四周，抓住了关键的东西。')
+    try {
+      ctx.startIt()
+      await waitFor(() =>
+        ctx.engine.log.some((l) => l.type === 'action' && l.text === '我重新观察四周，抓住了关键的东西。'),
+      )
+      // 第二次请求的 user 消息里带着驳回理由
+      const users = ctx.pcSession.messages.filter((m) => m.role === 'user')
+      expect(users.length).toBeGreaterThanOrEqual(2)
+      expect(users[1].content).toContain('驳回')
+      expect(users[1].content).toContain('关键词无痕迹')
+      const actions = ctx.engine.log.filter((l) => l.type === 'action')
+      expect(actions.slice(0, 2).map((a) => a.text)).toEqual([
+        '我躲在角落发抖。',
+        '我重新观察四周，抓住了关键的东西。',
+      ])
+    } finally {
+      ctx.stop()
+    }
+  })
+
+  it('生成失败 → interrupted → 重试成功（无悬挂 user 消息）', async () => {
+    const ctx = makeLlmPcGame([KP_SCENE_REPLY, KP_RESOLVE_END_REPLY])
+    let failed = false
+    const orig = ctx.pcClient.complete.bind(ctx.pcClient) as () => Promise<string>
+    ;(ctx.pcClient as unknown as Record<string, unknown>).complete = async () => {
+      if (!failed) {
+        failed = true
+        throw new Error('HTTP 500')
+      }
+      return orig()
+    }
+    try {
+      ctx.startIt()
+      await waitFor(() => ctx.engine.phase === 'interrupted')
+      expect(ctx.events.some((e) => e.type === 'error' && e.stage === 'pc-act')).toBe(true)
+      // 失败的请求已从会话弹出，不残留悬挂 user
+      expect(ctx.pcSession.messages).toHaveLength(0)
+
+      ctx.engine.retryInterrupted()
+      await waitFor(() => ctx.engine.log.some((l) => l.type === 'action'))
+      expect(ctx.engine.log.some((l) => l.type === 'action' && l.roleName === '玩家B')).toBe(true)
+    } finally {
+      ctx.stop()
+    }
+  })
+
+  it('连续 3 次被驳回 → 暂停为 interrupted（护栏防无限重生成）', async () => {
+    const ctx = makeLlmPcGame([KP_SCENE_REPLY])
+    ;(ctx.mocks.validatorClient as unknown as Record<string, unknown>).complete = async (params: ChatParams) => {
+      const user = [...params.messages].reverse().find((m) => m.role === 'user')?.content ?? ''
+      const kwBlock = user.match(/玩家关键词[\s\S]*?(?=## 玩家行动)/)?.[0] ?? ''
+      const kws = [...kwBlock.matchAll(/^- (.+)$/gm)].map((m) => m[1])
+      const usage: Record<string, boolean> = {}
+      kws.forEach((k) => (usage[k] = false))
+      return JSON.stringify({ valid: false, keyword_usage: usage, world_consistent: true, reason: '全都无痕迹' })
+    }
+    ctx.pcReplies.push('一', '二', '三', '四')
+    try {
+      ctx.startIt()
+      await waitFor(() => ctx.engine.phase === 'interrupted')
+      expect(ctx.engine.log.filter((l) => l.type === 'action')).toHaveLength(3)
+      expect(ctx.engine.log.some((l) => l.type === 'warning' && l.text.includes('连续 3 次'))).toBe(true)
+    } finally {
+      ctx.stop()
+    }
+  })
+
+  it('全体重骰：LLM PC 会话回滚到本轮开始', async () => {
+    const ctx = makeLlmPcGame([KP_SCENE_REPLY, KP_SCENE_REPLY])
+    // 每次PC 行动都人工放行（可中断），完全掌控推进节奏
+    let calls = 0
+    let release: (() => void) | null = null
+    ;(ctx.pcClient as unknown as Record<string, unknown>).complete = (
+      _p: ChatParams,
+      _s: string,
+      signal?: AbortSignal,
+    ) =>
+      new Promise<string>((resolve, reject) => {
+        calls++
+        release = () => resolve(PC_ACTION)
+        const onAbort = () => reject(new DOMException('aborted', 'AbortError'))
+        if (signal?.aborted) onAbort()
+        else signal?.addEventListener('abort', onAbort, { once: true })
+      })
+    try {
+      ctx.startIt()
+      await waitFor(() => calls === 1) // 引擎在等第一次 PC 行动
+
+      const ok = await ctx.engine.requestReroll('pc-llm-1')
+      expect(ok).toBe(true)
+      // 重骰兑现：回滚（KP 会话回到开场前的 0 条并重建第 2 轮开场）→ 引擎重新等 PC 行动
+      await waitFor(() => calls === 2 && ctx.kpSession.messages.length === 2)
+      expect(ctx.engine.round).toBe(2)
+      expect(ctx.kpSession.messages[0].content).toContain('第 2 轮')
+      // 旧尝试随 abort 弹出：PC 会话里只有挂起中的新请求（user 已 push、assistant 未回）
+      expect(ctx.pcSession.messages).toHaveLength(1)
+
+      release!()
+      await waitFor(() => ctx.engine.log.some((l) => l.type === 'action' && l.round === 2))
+    } finally {
+      ctx.stop()
+    }
   })
 })

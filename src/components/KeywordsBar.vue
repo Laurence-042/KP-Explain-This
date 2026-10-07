@@ -38,7 +38,9 @@ function deriveOf(roleId: RoleId): { digits: string; page: number } | null {
     <div v-for="role in pcRoles" :key="role.id" class="kw-group kw-pc">
       <div class="kw-role">
         <span class="kw-role-name">{{ role.name }}</span>
-        <span class="kw-role-tag">{{ t('pcTag') }}</span>
+        <span class="kw-role-tag" :class="{ 'kw-llm-tag': role.controller === 'llm' }">
+          {{ role.controller === 'llm' ? t('pcLlmTag') : t('pcTag') }}
+        </span>
       </div>
       <div class="kw-body">
         <span class="dice-row">

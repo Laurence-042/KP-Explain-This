@@ -12,6 +12,8 @@ export type ConnectionConfig = {
 export type GameConfig = {
   kp: ConnectionConfig
   validator: ConnectionConfig
+  /** LLM 玩家：独立 LLM PC 与本地玩家的「LLM 代写」共用 */
+  pcLlm: ConnectionConfig
 }
 
 export function parseTemperature(raw: string): number | undefined {

@@ -2,7 +2,13 @@ import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { GameEngine, type EngineEvent } from '../core/engine'
-import { HumanController, LlmKpController, type RoleController } from '../core/controller'
+import {
+  HumanController,
+  LlmKpController,
+  LlmPcController,
+  stripFences,
+  type RoleController,
+} from '../core/controller'
 import { LLMClient, type LlmDiagnostics } from '../core/llm/client'
 import { LLMSession } from '../core/llm/session'
 import type {
@@ -16,6 +22,7 @@ import type {
 } from '../core/types'
 import { parsePdfPages, parseTxt } from '../core/book'
 import { diceToNumber } from '../core/randomizer'
+import { buildPcAssistMessages } from '../core/prompts'
 import { narrativeViewForStream } from '../core/json-out'
 import {
   buildSave,
@@ -37,6 +44,8 @@ export type StartSetup = {
   diceCount: number
   /** 每页词数：仅对 TXT 生效 */
   pageWords: number
+  /** LLM 扮演的玩家（独立行动、过 Validator） */
+  llmPcs: Array<{ name: string; bookId: string }>
 }
 
 export type DiceLandPick = {
@@ -104,6 +113,11 @@ export function useGame(config: UseConfig) {
   const saveName = ref('')
   const hasLocalSave = ref(false)
   const awaitingAction = ref(false)
+  /** 正在生成行动的 LLM PC 名字（空 = 无） */
+  const pcActing = ref('')
+  /** 「LLM 代写」草稿注入（seq 递增触发 ActionComposer 合并进输入框） */
+  const assistInsert = ref<{ seq: number; text: string } | null>(null)
+  const assisting = ref(false)
 
   const diceOverlay = ref<DiceOverlayState>({ visible: false, entries: [] })
   let overlaySettleTimer: ReturnType<typeof setTimeout> | null = null
@@ -117,6 +131,9 @@ export function useGame(config: UseConfig) {
   let kpSession: LLMSession | null = null
   let validatorSession: LLMSession | null = null
   let humanController: HumanController | null = null
+  /** LLM PC 会话（RoleId → 独立历史），共享一个 pcLlm 传输 client */
+  let pcLlmSessions: Record<RoleId, LLMSession> = {}
+  let pcLlmClient: LLMClient | null = null
   let bookDocs: Record<string, BookDocument> = {}
   /** 导出存档时内嵌的原始内容（BookDocument 不再携带全文） */
   let bookTexts: Record<string, string> = {}
@@ -129,7 +146,7 @@ export function useGame(config: UseConfig) {
   const running = computed(() =>
     ['kp-scene', 'kp-resolve', 'validating', 'rolling', 'init-roll', 'reroll'].includes(phase.value),
   )
-  const canSubmit = computed(() => phase.value === 'await-action')
+  const canSubmit = computed(() => phase.value === 'await-action' && !pcActing.value)
   const canReroll = computed(
     () => phase.value === 'await-action' || phase.value === 'interrupted',
   )
@@ -156,7 +173,9 @@ export function useGame(config: UseConfig) {
     const client =
       stage === 'validator' || stage === 'validator-retry'
         ? validatorSession?.client
-        : kpSession?.client
+        : stage === 'pc-act' || stage === 'pc-assist'
+          ? pcLlmClient
+          : kpSession?.client
     diagnostics.value = client?.diagnostics ?? null
     diagnosticsOpen.value = true
     ElMessage.error(t('requestFailed'))
@@ -266,6 +285,9 @@ export function useGame(config: UseConfig) {
         syncAll()
         scheduleSave()
         break
+      case 'pc-acting':
+        pcActing.value = e.active ? e.roleName : pcActing.value === e.roleName ? '' : pcActing.value
+        break
       case 'mutated':
         syncAll()
         scheduleSave()
@@ -300,6 +322,13 @@ export function useGame(config: UseConfig) {
     validatorSession.params.model = config.form.validator.model.trim()
     validatorSession.params.temperature = parseTemperature(config.form.validator.temperature) ?? 0.1
     validatorSession.params.maxTokens = parseMaxTokens(config.form.validator.maxTokens)
+    pcLlmClient = makeClient(config.form.pcLlm)
+    for (const s of Object.values(pcLlmSessions)) {
+      s.client = pcLlmClient
+      s.params.model = config.form.pcLlm.model.trim() || 'pc-llm-model'
+      s.params.temperature = parseTemperature(config.form.pcLlm.temperature) ?? 0.8
+      s.params.maxTokens = parseMaxTokens(config.form.pcLlm.maxTokens)
+    }
   }
 
   // 游戏进行中修改连接配置即时生效
@@ -324,26 +353,30 @@ export function useGame(config: UseConfig) {
       : { id: stored.id, name: stored.name, source: 'txt', pageWordCount: pageWords }
   }
 
-  async function loadBooks(kpBookId: string, pcBookId: string, pageWords: number): Promise<boolean> {
-    const kpStored = await books.getBook(kpBookId)
-    const pcStored = await books.getBook(pcBookId)
-    if (!kpStored || !pcStored) {
+  async function loadBooks(bookIds: string[], pageWords: number): Promise<boolean> {
+    const uniqueIds = [...new Set(bookIds.filter(Boolean))]
+    if (uniqueIds.length === 0) {
       ElMessage.error(t('booksMissing'))
       return false
     }
-    bookDocs = { [kpBookId]: parseStored(kpStored, pageWords) }
-    if (pcBookId !== kpBookId) {
-      bookDocs[pcBookId] = parseStored(pcStored, pageWords)
-    }
-    bookTexts = { [kpBookId]: kpStored.text ?? '' }
-    bookPageTexts = { [kpBookId]: kpStored.pageTexts ?? [] }
-    if (pcBookId !== kpBookId) {
-      bookTexts[pcBookId] = pcStored.text ?? ''
-      bookPageTexts[pcBookId] = pcStored.pageTexts ?? []
-    }
+    const docs: Record<string, BookDocument> = {}
+    const texts: Record<string, string> = {}
+    const pageTextsMap: Record<string, string[]> = {}
     const metas = new Map<string, BookMeta>()
-    metas.set(kpBookId, metaOf(kpStored, pageWords))
-    if (pcBookId !== kpBookId) metas.set(pcBookId, metaOf(pcStored, pageWords))
+    for (const id of uniqueIds) {
+      const stored = await books.getBook(id)
+      if (!stored) {
+        ElMessage.error(t('booksMissing'))
+        return false
+      }
+      docs[id] = parseStored(stored, pageWords)
+      texts[id] = stored.text ?? ''
+      pageTextsMap[id] = stored.pageTexts ?? []
+      metas.set(id, metaOf(stored, pageWords))
+    }
+    bookDocs = docs
+    bookTexts = texts
+    bookPageTexts = pageTextsMap
     bookMetas = [...metas.values()]
     return true
   }
@@ -351,7 +384,19 @@ export function useGame(config: UseConfig) {
   // ── 开局 ──
 
   async function startGame(setup: StartSetup): Promise<boolean> {
-    if (!(await loadBooks(setup.kpBookId, setup.pcBookId, setup.pageWords))) return false
+    const needPcLlm = setup.llmPcs.length > 0
+    if (needPcLlm && !config.connectionReady(config.form.pcLlm)) {
+      ElMessage.warning(t('pcLlmNotReady'))
+      return false
+    }
+    if (
+      !(await loadBooks(
+        [setup.kpBookId, setup.pcBookId, ...setup.llmPcs.map((p) => p.bookId)],
+        setup.pageWords,
+      ))
+    ) {
+      return false
+    }
 
     const kpRoleDef: RoleDef = {
       id: 'kp',
@@ -370,13 +415,28 @@ export function useGame(config: UseConfig) {
 
     kpSession = makeSession(config.form.kp, 0.8, 'kp-model')
     validatorSession = makeSession(config.form.validator, 0.1, 'validator-model')
+    pcLlmClient = makeClient(config.form.pcLlm)
+    pcLlmSessions = {}
+    const controllers: RoleController[] = [new LlmKpController(kpRoleDef, kpSession)]
     humanController = new HumanController(pcRoleDef, {
       onAwaitAction: (v) => (awaitingAction.value = v),
     })
-    const controllers: RoleController[] = [
-      new LlmKpController(kpRoleDef, kpSession),
-      humanController,
-    ]
+    // 本地玩家保持在 pcControllers[0]（引擎把获得的物品记到首个 PC 名下），LLM PC 随后
+    controllers.push(humanController)
+    setup.llmPcs.forEach((p, i) => {
+      const id = `pc-llm-${i + 1}`
+      const roleDef: RoleDef = {
+        id,
+        name: p.name.trim() || `玩家${'BCDEF'[i] ?? i + 1}`,
+        kind: 'pc',
+        controller: 'llm',
+        bookId: p.bookId,
+      }
+      const session = makeSession(config.form.pcLlm, 0.8, 'pc-llm-model')
+      session.client = pcLlmClient!
+      pcLlmSessions[id] = session
+      controllers.push(new LlmPcController(roleDef, session))
+    })
 
     engine = new GameEngine(validatorSession, handleEvent)
     const kpStoredName = bookMetas.find((m) => m.id === setup.kpBookId)?.name ?? ''
@@ -385,6 +445,7 @@ export function useGame(config: UseConfig) {
     streamingRaw.value = ''
     kpKeywordsHidden.value = false
     awaitingAction.value = false
+    pcActing.value = ''
     view.value = 'game'
     void engine.start(controllers, validatorSession, bookDocs, setup.diceCount).catch(() => {})
     scheduleSave()
@@ -396,6 +457,44 @@ export function useGame(config: UseConfig) {
   async function submitAction(text: string): Promise<void> {
     // 行动通过人类控制器直达引擎；拒绝/通过信息由 Validator 卡片展示
     humanController?.submitText(text)
+  }
+
+  /** 「LLM 代写」：用 LLM 玩家连接为本地玩家草拟行动，填入输入框（不自动提交） */
+  async function requestAssist(): Promise<void> {
+    if (!engine || !pcRole.value || !canSubmit.value || assisting.value) return
+    if (!config.connectionReady(config.form.pcLlm)) {
+      ElMessage.warning(t('pcLlmNotReady'))
+      return
+    }
+    assisting.value = true
+    try {
+      const role = pcRole.value
+      const messages = buildPcAssistMessages(
+        role.name,
+        engine.world,
+        engine.keywords[role.id] ?? [],
+        engine.round,
+        engine.currentSceneNarrative,
+      )
+      const client = pcLlmClient ?? (pcLlmClient = makeClient(config.form.pcLlm))
+      const raw = await client.complete(
+        {
+          model: config.form.pcLlm.model.trim() || 'pc-llm-model',
+          messages,
+          temperature: parseTemperature(config.form.pcLlm.temperature) ?? 0.8,
+          maxTokens: parseMaxTokens(config.form.pcLlm.maxTokens),
+        },
+        'pc-assist',
+      )
+      const text = stripFences(raw)
+      if (text) {
+        assistInsert.value = { seq: (assistInsert.value?.seq ?? 0) + 1, text }
+      }
+    } catch {
+      showError('pc-assist')
+    } finally {
+      assisting.value = false
+    }
   }
 
   /** 发起重骰：确认弹窗即玩家的同意；其余角色（KP）由引擎协商 */
@@ -428,6 +527,8 @@ export function useGame(config: UseConfig) {
     kpSession = null
     validatorSession = null
     humanController = null
+    pcLlmSessions = {}
+    pcLlmClient = null
     view.value = 'setup'
     phase.value = 'setup'
     log.value = []
@@ -435,6 +536,8 @@ export function useGame(config: UseConfig) {
     round.value = 0
     streamingRaw.value = ''
     awaitingAction.value = false
+    pcActing.value = ''
+    assisting.value = false
     closeOverlay()
   }
 
@@ -446,17 +549,20 @@ export function useGame(config: UseConfig) {
 
   function buildSaveFile(includeText: boolean): SaveFileV1 | null {
     if (!engine || !kpSession || !validatorSession) return null
-    return buildSave(
-      saveName.value,
-      engine.snapshot(),
-      kpSession.serialize(),
-      validatorSession.serialize(),
-      bookMetas.map((m) =>
+    const pcSessions: Record<string, ReturnType<LLMSession['serialize']>> = {}
+    for (const [id, s] of Object.entries(pcLlmSessions)) pcSessions[id] = s.serialize()
+    return buildSave({
+      name: saveName.value,
+      engine: engine.snapshot(),
+      kpSession: kpSession.serialize(),
+      validatorSession: validatorSession.serialize(),
+      pcSessions,
+      books: bookMetas.map((m) =>
         m.source === 'pdf'
           ? { ...m, pageTexts: includeText ? bookPageTexts[m.id] : undefined }
           : { ...m, text: includeText ? bookTexts[m.id] : undefined },
       ),
-    )
+    })
   }
 
   function saveToLocal(): void {
@@ -515,14 +621,28 @@ export function useGame(config: UseConfig) {
     kpSession.summaryText = save.kpSession.summaryText
 
     const snapshot = save.engine
-    const controllers: RoleController[] = snapshot.roles.map((role) =>
-      role.kind === 'kp'
-        ? new LlmKpController(role, kpSession!)
-        : new HumanController(role, {
-            onAwaitAction: (v) => (awaitingAction.value = v),
-          }),
-    )
-    humanController = (controllers.find((c) => c.role.kind === 'pc') as HumanController) ?? null
+    pcLlmClient = makeClient(config.form.pcLlm)
+    pcLlmSessions = {}
+    const savedPcSessions = save.pcSessions ?? {}
+    const controllers: RoleController[] = snapshot.roles.map((role) => {
+      if (role.kind === 'kp') return new LlmKpController(role, kpSession!)
+      if (role.controller === 'llm') {
+        // LLM PC：会话参数取本机配置，只还原历史与摘要（旧档无 pcSessions 则空会话）
+        const session = makeSession(config.form.pcLlm, 0.8, 'pc-llm-model')
+        session.client = pcLlmClient!
+        const saved = savedPcSessions[role.id]
+        if (saved) {
+          session.messages = saved.messages
+          session.summaryText = saved.summaryText
+        }
+        pcLlmSessions[role.id] = session
+        return new LlmPcController(role, session)
+      }
+      return new HumanController(role, {
+        onAwaitAction: (v) => (awaitingAction.value = v),
+      })
+    })
+    humanController = (controllers.find((c) => c instanceof HumanController) as HumanController) ?? null
 
     engine = new GameEngine(validatorSession, handleEvent)
     engine.restore(snapshot, controllers, docs)
@@ -631,12 +751,13 @@ export function useGame(config: UseConfig) {
     view, phase, phaseLabel, round, roles, keywords, pages, rolls, log, world,
     sceneEndHint, streamingNarrative, summarizing, flipTick, lastDice,
     kpKeywordsHidden, saveName, hasLocalSave, diagnostics, diagnosticsOpen,
-    awaitingAction, diceOverlay,
+    awaitingAction, diceOverlay, pcActing, assistInsert, assisting,
     kpRole, pcRole, running, canSubmit, canReroll,
     // 书库
     books,
     // 操作
     startGame, submitAction, requestReroll, retryInterrupted, abort, newGame,
+    requestAssist,
     bookDocOf,
     // 存档
     saveToLocal, clearLocalSave, continueLocalSave, exportSaveFile, importSaveFile, checkLocalSave,

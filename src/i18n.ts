@@ -69,6 +69,13 @@ const messages = {
     backToSetup: '已返回开局设置',
     flippingText: '……',
 
+    // LLM 代写 / LLM 玩家连接
+    assistDraft: 'LLM 代写',
+    assistHint: '用「LLM 玩家」连接为你的行动生成草稿，可修改后再提交',
+    pcLlmSection: 'LLM 玩家',
+    pcLlmHint: '独立 LLM PC 与「LLM 代写」共用的连接；可与 KP/Validator 使用不同端点、模型与温度',
+    pcLlmNotReady: '请先在设置中配置「LLM 玩家」连接',
+
     // 掷骰动画
     diceOverlay: {
       title: '掷骰',
@@ -81,6 +88,8 @@ const messages = {
 
     // 关键词条
     pcTag: '玩家',
+    pcLlmTag: 'LLM',
+    pcActingChip: '{name} 正在行动…',
     kpName: 'KP',
     kpTag: '主持人',
     showKpKeywords: '显示',
@@ -128,6 +137,9 @@ const messages = {
       pickBook: '选择书籍',
       pcName: '你的名字',
       pcNamePlaceholder: '玩家A',
+      llmPlayers: 'LLM 玩家',
+      addLlmPc: '添加 LLM 玩家',
+      llmPcHint: '由 LLM 扮演的玩家：每轮自主行动，同样要过 Validator 验证（走设置中的「LLM 玩家」连接）',
       diceCount: '骰子数量',
       diceCountHint: '掷在书页上的 1d10 骰子个数（= 关键词个数）；骰面按个/十/百位组合决定翻页（3 个 ≈ 1d1000）',
       pageWords: '每页词数',

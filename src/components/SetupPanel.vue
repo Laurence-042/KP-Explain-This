@@ -2,7 +2,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { Delete, FolderOpened, Upload, MagicStick } from '@element-plus/icons-vue'
+import { Delete, FolderOpened, Upload, MagicStick, Plus } from '@element-plus/icons-vue'
 import type { UseGame } from '../composables/useGame'
 import type { StoredBook } from '../composables/useBooks'
 import { diceReachableMaxPage } from '../core/book'
@@ -11,13 +11,22 @@ const props = defineProps<{
   game: UseGame
   /** KP / Validator 连接是否都已就绪 */
   configReady: boolean
+  /** LLM 玩家连接是否就绪（配置了 LLM PC 或使用代写时需要） */
+  pcLlmReady: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'open-settings'): void
   (
     e: 'start',
-    setup: { kpBookId: string; pcBookId: string; pcName: string; diceCount: number; pageWords: number },
+    setup: {
+      kpBookId: string
+      pcBookId: string
+      pcName: string
+      diceCount: number
+      pageWords: number
+      llmPcs: Array<{ name: string; bookId: string }>
+    },
   ): void
 }>()
 
@@ -31,7 +40,19 @@ const form = reactive({
   pcName: '玩家A',
   diceCount: 3,
   pageWords: 300,
+  /** LLM 扮演的玩家（可增删） */
+  llmPcs: [] as Array<{ name: string; bookId: string }>,
 })
+
+function addLlmPc() {
+  const i = form.llmPcs.length
+  const autoBook = bookOptions.value.length === 1 ? bookOptions.value[0].id : ''
+  form.llmPcs.push({ name: `玩家${'BCDEF'[i] ?? i + 2}`, bookId: autoBook })
+}
+
+function removeLlmPc(index: number) {
+  form.llmPcs.splice(index, 1)
+}
 
 const bookOptions = computed(() => props.game.books.books.value)
 
@@ -52,7 +73,7 @@ function bookPageCount(book: StoredBook | undefined): number | null {
 }
 
 const selectedBooks = computed(() => {
-  const ids = [...new Set([form.kpBookId, form.pcBookId])].filter(Boolean)
+  const ids = [...new Set([form.kpBookId, form.pcBookId, ...form.llmPcs.map((p) => p.bookId)])].filter(Boolean)
   return ids.map((id) => findBook(id)).filter((b): b is StoredBook => Boolean(b))
 })
 
@@ -78,6 +99,8 @@ const canStart = computed(
   () =>
     props.configReady &&
     Boolean(form.kpBookId && form.pcBookId) &&
+    form.llmPcs.every((p) => p.bookId) &&
+    (form.llmPcs.length === 0 || props.pcLlmReady) &&
     !props.game.books.importing.value,
 )
 
@@ -101,11 +124,17 @@ function removeBook(id: string) {
   void props.game.books.removeBook(id)
   if (form.kpBookId === id) form.kpBookId = ''
   if (form.pcBookId === id) form.pcBookId = ''
+  for (const pc of form.llmPcs) {
+    if (pc.bookId === id) pc.bookId = ''
+  }
 }
 
 function start() {
   if (!canStart.value) return
-  emit('start', { ...form })
+  emit('start', {
+    ...form,
+    llmPcs: form.llmPcs.map((p) => ({ ...p, name: p.name.trim() })),
+  })
 }
 
 async function onImportSaveFile(event: Event) {
@@ -205,6 +234,19 @@ watch(bookOptions, (list) => {
         </el-form-item>
         <el-form-item :label="t('setup.pcName')">
           <el-input v-model="form.pcName" :placeholder="t('setup.pcNamePlaceholder')" maxlength="12" style="width: 100%" />
+        </el-form-item>
+        <el-form-item :label="t('setup.llmPlayers')">
+          <div class="llm-pc-list">
+            <div v-for="(pc, i) in form.llmPcs" :key="i" class="llm-pc-row">
+              <el-input v-model="pc.name" :placeholder="t('setup.pcNamePlaceholder')" maxlength="12" class="llm-pc-name" />
+              <el-select v-model="pc.bookId" :placeholder="t('setup.pickBook')" style="flex: 1">
+                <el-option v-for="b in bookOptions" :key="b.id" :label="b.name" :value="b.id" />
+              </el-select>
+              <el-button :icon="Delete" circle size="small" text type="danger" @click="removeLlmPc(i)" />
+            </div>
+            <el-button size="small" :icon="Plus" @click="addLlmPc">{{ t('setup.addLlmPc') }}</el-button>
+            <div class="form-hint">{{ t('setup.llmPcHint') }}</div>
+          </div>
         </el-form-item>
         <el-form-item :label="t('setup.diceCount')">
           <el-input-number v-model="form.diceCount" :min="1" :max="10" />

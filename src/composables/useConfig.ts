@@ -26,13 +26,14 @@ function loadConnection(saved: unknown, fallback: ConnectionConfig): ConnectionC
 }
 
 /**
- * KP / Validator 双连接配置。
- * 两者可以使用不同的 endpoint、key、模型与温度；默认 Validator 复制 KP 的连接。
+ * KP / Validator / LLM 玩家 三连接配置。
+ * 各连接可以使用不同的 endpoint、key、模型与温度；Validator 与 LLM 玩家可一键复制 KP 连接。
  */
 export function useConfig() {
   const form = reactive<GameConfig>({
     kp: defaultConnection('0.8'),
     validator: defaultConnection('0.1'),
+    pcLlm: defaultConnection('0.8'),
   })
 
   function save() {
@@ -46,17 +47,20 @@ export function useConfig() {
       const saved = JSON.parse(raw) as Partial<GameConfig>
       form.kp = loadConnection(saved.kp, form.kp)
       form.validator = loadConnection(saved.validator, form.validator)
+      // 旧配置没有 pcLlm 字段：保持默认（读取边界归一化）
+      form.pcLlm = loadConnection(saved.pcLlm, form.pcLlm)
       return true
     } catch {
       return false
     }
   }
 
-  /** Validator 直接复用 KP 的 endpoint/key（模型与温度保持独立） */
-  function copyKpConnection() {
-    form.validator.baseUrl = form.kp.baseUrl
-    form.validator.apiKey = form.kp.apiKey
-    if (!form.validator.model) form.validator.model = form.kp.model
+  /** 目标连接直接复用 KP 的 endpoint/key（模型与温度保持独立） */
+  function copyKpConnection(target: 'validator' | 'pcLlm' = 'validator') {
+    const dst = form[target]
+    dst.baseUrl = form.kp.baseUrl
+    dst.apiKey = form.kp.apiKey
+    if (!dst.model) dst.model = form.kp.model
   }
 
   function connectionReady(c: ConnectionConfig): boolean {

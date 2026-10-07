@@ -1,10 +1,19 @@
 import type { RoleDef, WorldState } from './types'
 import type { LLMSession } from './llm/session'
-import { buildKpResolveUser, buildKpSceneOpening, buildKpSystemPrompt } from './prompts'
+import {
+  buildKpResolveUser,
+  buildKpSceneOpening,
+  buildKpSystemPrompt,
+  buildPcActionUser,
+  buildPcRetryUser,
+  buildPcSystemPrompt,
+} from './prompts'
 
 /**
- * 角色控制器统一接口（story 要求：LLM 与玩家同基类、相同接口操作）。
- * 人类玩家、LLM KP、未来的 LLM PC 与联机远程玩家都实现本接口；
+ * 角色控制器统一接口——三种变体的共同契约：
+ * - HumanController   接入本地玩家
+ * - BaseLlmController 接入 LLM（LlmKpController / LlmPcController）
+ * - （未来）RemoteController 接入在线玩家：实现本接口即可，引擎零改动
  * 引擎只面向 RoleController 编排，不关心背后是谁。
  */
 
@@ -27,6 +36,8 @@ export type ActionRequest = {
   validatedAction?: { roleName: string; text: string }
   /** kp-scene：上一场景结尾（衔接用） */
   lastNarrative?: string
+  /** pc-act：KP 最新的场景叙述（LLM PC 据此回应；人类控制器忽略） */
+  sceneNarrative?: string
   /** 流式增量回调（LLM 控制器透传） */
   onStream?: (delta: string) => void
 }
@@ -44,7 +55,7 @@ export interface RoleController {
   requestRerollConsent(): Promise<boolean>
   /** 响应已被引擎采纳。appliedText：KP=剥离 JSON 后的叙事；PC=行动原文 */
   onApplied(req: ActionRequest, appliedText: string): void
-  /** PC 行动被 Validator 驳回（人类控制器可刷新提示） */
+  /** PC 行动被 Validator 驳回（人类控制器刷新提示 / LLM 控制器据此重写） */
   onRejected?(reason: string): void
   /** 场景级回滚点（重骰时回滚世界状态与控制器自身历史） */
   sceneCheckpoint(): unknown
@@ -53,7 +64,7 @@ export interface RoleController {
   abort(): void
 }
 
-// ===== 人类控制器：Promise 挂起，由 UI 通过 useGame 转发 resolve =====
+// ===== 变种一：人类控制器。Promise 挂起，由 UI 通过 useGame 转发 resolve =====
 
 export type HumanControllerHooks = {
   /** 引擎开始/停止等待该玩家提交行动 */
@@ -164,9 +175,10 @@ export class HumanController implements RoleController {
   }
 }
 
-// ===== LLM KP 控制器：持有独立会话，负责场景叙事 =====
+// ===== 变种二：LLM 控制器。会话机制共享，角色差异在子类 =====
 
-export class LlmKpController implements RoleController {
+/** LLM 变种的共享机制：独立会话、重骰协商与回滚 */
+export abstract class BaseLlmController implements RoleController {
   readonly role: RoleDef
   readonly session: LLMSession
 
@@ -175,29 +187,13 @@ export class LlmKpController implements RoleController {
     this.session = session
   }
 
-  async requestAction(req: ActionRequest, signal: AbortSignal): Promise<ControllerResponse> {
-    this.session.params.systemPrompt = () =>
-      buildKpSystemPrompt(req.world, req.keywords, req.round)
-    const userMessage =
-      req.kind === 'kp-respond' && req.validatedAction
-        ? buildKpResolveUser({ roleId: this.role.id, text: req.validatedAction.text }, req.validatedAction.roleName)
-        : buildKpSceneOpening(req.round, req.lastNarrative)
-    const text = await this.session.send(userMessage, {
-      onChunk: req.onStream,
-      signal,
-      stage: req.kind === 'kp-respond' ? 'kp-resolve' : 'kp-scene',
-    })
-    return { text }
-  }
+  abstract requestAction(req: ActionRequest, signal: AbortSignal): Promise<ControllerResponse>
 
-  /** LLM KP 总是同意重骰（接口保留：未来可改为真问模型） */
+  abstract onApplied(req: ActionRequest, appliedText: string): void
+
+  /** LLM 角色总是同意重骰（接口保留：未来可改为真问模型） */
   async requestRerollConsent(): Promise<boolean> {
     return true
-  }
-
-  onApplied(_req: ActionRequest, appliedText: string): void {
-    // 引擎已完成解析与日志，历史只保留纯叙事（去掉 JSON 块，节省上下文）
-    this.session.amendLastAssistant(appliedText)
   }
 
   sceneCheckpoint(): unknown {
@@ -217,4 +213,75 @@ export class LlmKpController implements RoleController {
   abort(): void {
     // 进行中的请求由引擎经 signal 中止
   }
+
+  /** 会话末尾悬挂的 user 消息（发送后未得到回复）弹出，保证历史整齐 */
+  protected trimDanglingUser(): void {
+    const messages = this.session.messages
+    if (messages.length > 0 && messages[messages.length - 1].role === 'user') {
+      messages.pop()
+    }
+  }
+}
+
+/** KP：场景叙事 + state_changes */
+export class LlmKpController extends BaseLlmController {
+  async requestAction(req: ActionRequest, signal: AbortSignal): Promise<ControllerResponse> {
+    this.session.params.systemPrompt = () =>
+      buildKpSystemPrompt(req.world, req.keywords, req.round)
+    const userMessage =
+      req.kind === 'kp-respond' && req.validatedAction
+        ? buildKpResolveUser({ roleId: this.role.id, text: req.validatedAction.text }, req.validatedAction.roleName)
+        : buildKpSceneOpening(req.round, req.lastNarrative)
+    const text = await this.session.send(userMessage, {
+      onChunk: req.onStream,
+      signal,
+      stage: req.kind === 'kp-respond' ? 'kp-resolve' : 'kp-scene',
+    })
+    return { text }
+  }
+
+  onApplied(_req: ActionRequest, appliedText: string): void {
+    // 引擎已完成解析与日志，历史只保留纯叙事（去掉 JSON 块，节省上下文）
+    this.session.amendLastAssistant(appliedText)
+  }
+}
+
+/** PC：以玩家身份写行动。被 Validator 驳回时带着理由自动重写 */
+export class LlmPcController extends BaseLlmController {
+  private lastRejection: string | null = null
+
+  async requestAction(req: ActionRequest, signal: AbortSignal): Promise<ControllerResponse> {
+    this.session.params.systemPrompt = () =>
+      buildPcSystemPrompt(this.role.name, req.world, req.keywords, req.round)
+    const narrative = req.sceneNarrative ?? ''
+    const userMessage = this.lastRejection
+      ? buildPcRetryUser(narrative, this.lastRejection)
+      : buildPcActionUser(narrative)
+    this.lastRejection = null
+    let text: string
+    try {
+      text = await this.session.send(userMessage, { signal, stage: 'pc-act' })
+    } catch (err) {
+      this.trimDanglingUser()
+      throw err
+    }
+    return { text: stripFences(text) }
+  }
+
+  onRejected(reason: string): void {
+    // 记录驳回理由，供下一次 requestAction 组装重写提示（历史里已保留被驳回的尝试）
+    this.lastRejection = reason
+  }
+
+  onApplied(): void {
+    // 行动原文即历史，无需 amend
+  }
+}
+
+/** 剥掉模型偶尔裹在输出外面的 markdown 围栏（PC 只应输出纯文本行动） */
+export function stripFences(text: string): string {
+  return text
+    .replace(/```[\w-]*[ \t]*\r?\n?([\s\S]*?)```/g, '$1')
+    .replace(/```/g, '')
+    .trim()
 }

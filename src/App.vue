@@ -95,6 +95,7 @@ onMounted(() => {
         v-if="!inGame"
         :game="game"
         :config-ready="configReady"
+        :pc-llm-ready="config.connectionReady(config.form.pcLlm)"
         @open-settings="settingsOpen = true"
         @start="onStart"
       />
@@ -145,10 +146,14 @@ onMounted(() => {
             :running="game.running.value"
             :can-reroll="game.canReroll.value"
             :interrupted="game.phase.value === 'interrupted'"
+            :pc-acting="game.pcActing.value"
+            :assisting="game.assisting.value"
+            :assist-insert="game.assistInsert.value"
             @send="onSend"
             @reroll="game.requestReroll()"
             @retry="game.retryInterrupted()"
             @abort="game.abort()"
+            @assist="game.requestAssist()"
           />
         </div>
       </div>

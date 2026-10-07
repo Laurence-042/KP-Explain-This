@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CopyDocument, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useModels } from '../composables/useModels'
 import type { UseConfig } from '../composables/useConfig'
+import ConnectionSection from './ConnectionSection.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -18,22 +18,12 @@ defineEmits<{
 const { t } = useI18n()
 const kpModels = useModels(toRef(props.config.form, 'kp'))
 const validatorModels = useModels(toRef(props.config.form, 'validator'))
+const pcLlmModels = useModels(toRef(props.config.form, 'pcLlm'))
 
-function copyKpConnection() {
-  props.config.copyKpConnection()
+function copyKpTo(target: 'validator' | 'pcLlm') {
+  props.config.copyKpConnection(target)
   ElMessage.success(t('kpConnectionCopied'))
-  void validatorModels.fetchModels()
-}
-
-/** API Key 保持隐藏显示，但允许一键复制（会用 Key 的用户知道自己要做什么） */
-async function copyApiKey(value: string) {
-  if (!value) return
-  try {
-    await navigator.clipboard.writeText(value)
-    ElMessage.success(t('apiKeyCopied'))
-  } catch {
-    ElMessage.error(t('copyFailed'))
-  }
+  void (target === 'validator' ? validatorModels : pcLlmModels).fetchModels()
 }
 </script>
 
@@ -49,97 +39,40 @@ async function copyApiKey(value: string) {
       <!-- KP -->
       <h4 class="settings-section-title">{{ t('kpModelSection') }}</h4>
       <p class="form-hint">{{ t('kpModelHint') }}</p>
-      <el-form label-position="top">
-        <el-form-item label="Base URL">
-          <el-input v-model="config.form.kp.baseUrl" placeholder="https://api.example.com/v1" />
-        </el-form-item>
-        <el-form-item label="API Key">
-          <el-input v-model="config.form.kp.apiKey" type="password" show-password>
-            <template #append>
-              <el-button :icon="CopyDocument" :title="t('copyApiKey')" @click="copyApiKey(config.form.kp.apiKey)" />
-            </template>
-          </el-input>
-        </el-form-item>
-        <el-form-item :label="t('model')">
-          <div class="model-row">
-            <el-select
-              v-model="config.form.kp.model"
-              filterable
-              allow-create
-              default-first-option
-              :placeholder="t('modelPlaceholder')"
-              :loading="kpModels.modelsLoading.value"
-              style="flex: 1"
-            >
-              <el-option v-for="m in kpModels.availableModels.value" :key="m" :label="m" :value="m" />
-            </el-select>
-            <el-button :icon="Refresh" @click="kpModels.fetchModels()" />
-          </div>
-        </el-form-item>
-        <el-collapse class="advanced-collapse">
-          <el-collapse-item :title="t('advanced')" name="adv">
-            <el-form-item :label="t('temperature')">
-              <el-input v-model="config.form.kp.temperature" placeholder="0.8" />
-              <div class="form-hint">{{ t('temperatureHint') }}</div>
-            </el-form-item>
-            <el-form-item :label="t('maxTokens')">
-              <el-input v-model="config.form.kp.maxTokens" placeholder="1024" />
-              <div class="form-hint">{{ t('maxTokensHint') }}</div>
-            </el-form-item>
-          </el-collapse-item>
-        </el-collapse>
-      </el-form>
+      <ConnectionSection
+        :form="config.form.kp"
+        :models="kpModels"
+        temperature-placeholder="0.8"
+        temperature-hint-key="temperatureHint"
+      />
 
       <el-divider />
 
       <!-- Validator -->
-      <div class="settings-section-head">
-        <h4 class="settings-section-title">{{ t('validatorModelSection') }}</h4>
-        <el-button size="small" :icon="CopyDocument" @click="copyKpConnection">
-          {{ t('copyKpConnection') }}
-        </el-button>
-      </div>
+      <h4 class="settings-section-title">{{ t('validatorModelSection') }}</h4>
       <p class="form-hint">{{ t('validatorModelHint') }}</p>
-      <el-form label-position="top">
-        <el-form-item label="Base URL">
-          <el-input v-model="config.form.validator.baseUrl" placeholder="https://api.example.com/v1" />
-        </el-form-item>
-        <el-form-item label="API Key">
-          <el-input v-model="config.form.validator.apiKey" type="password" show-password>
-            <template #append>
-              <el-button :icon="CopyDocument" :title="t('copyApiKey')" @click="copyApiKey(config.form.validator.apiKey)" />
-            </template>
-          </el-input>
-        </el-form-item>
-        <el-form-item :label="t('model')">
-          <div class="model-row">
-            <el-select
-              v-model="config.form.validator.model"
-              filterable
-              allow-create
-              default-first-option
-              :placeholder="t('modelPlaceholder')"
-              :loading="validatorModels.modelsLoading.value"
-              style="flex: 1"
-            >
-              <el-option v-for="m in validatorModels.availableModels.value" :key="m" :label="m" :value="m" />
-            </el-select>
-            <el-button :icon="Refresh" @click="validatorModels.fetchModels()" />
-          </div>
-        </el-form-item>
-        <el-collapse class="advanced-collapse">
-          <el-collapse-item :title="t('advanced')" name="adv">
-            <el-form-item :label="t('temperature')">
-              <el-input v-model="config.form.validator.temperature" placeholder="0.1" />
-              <div class="form-hint">{{ t('validatorTemperatureHint') }}</div>
-            </el-form-item>
-            <el-form-item :label="t('maxTokens')">
-              <el-input v-model="config.form.validator.maxTokens" placeholder="512" />
-              <div class="form-hint">{{ t('maxTokensHint') }}</div>
-            </el-form-item>
-          </el-collapse-item>
-        </el-collapse>
-      </el-form>
+      <ConnectionSection
+        :form="config.form.validator"
+        :models="validatorModels"
+        temperature-placeholder="0.1"
+        temperature-hint-key="validatorTemperatureHint"
+        copy-kp
+        @copy-kp="copyKpTo('validator')"
+      />
+
+      <el-divider />
+
+      <!-- LLM 玩家（独立 LLM PC 与「LLM 代写」共用） -->
+      <h4 class="settings-section-title">{{ t('pcLlmSection') }}</h4>
+      <p class="form-hint">{{ t('pcLlmHint') }}</p>
+      <ConnectionSection
+        :form="config.form.pcLlm"
+        :models="pcLlmModels"
+        temperature-placeholder="0.8"
+        temperature-hint-key="temperatureHint"
+        copy-kp
+        @copy-kp="copyKpTo('pcLlm')"
+      />
     </div>
   </el-drawer>
 </template>

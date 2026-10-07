@@ -129,3 +129,64 @@ export function buildValidatorMessages(
 export function validatorRetryPrefix(errorHint: string): string {
   return `你上一次的输出无法解析为 JSON（${errorHint}）。请重新输出、且只输出符合格式的 JSON 对象。`
 }
+
+// ===== LLM PC（以玩家身份行动）与本地玩家的「LLM 代写」=====
+
+const PC_SYSTEM_PROMPT = `你是一场即兴叙事游戏中的玩家（PC）。KP（游戏主持人）负责描述场景与扮演所有 NPC，你只扮演你自己这一个角色。
+
+## 行动规则
+1. 每轮你会拿到若干【你的关键词】。你的回应必须让**每一个关键词都有痕迹**：字面出现，或任何相关展开（同义词、指代、联想到的意象）都可以——但不要机械罗列关键词。
+2. 回应写 1~3 句话（约 50~120 字），第一人称。只输出回应本身，不要标题、引号或代码块。
+3. 任何形式都合法：具体行动、说话、提问、观察、内心独白、情绪都可以。行动的后果由 KP 裁决，你只描述你想做的/想的。
+4. 尊重已确立的世界：不要凭空获得物品或能力、不要瞬移、不要否认已确立的客观事实、不要替 KP 或 NPC 做重大决定。
+5. 贴合当前场景的张力，给出有戏可接的回应——KP 会根据你的回应推进剧情。`
+
+/** LLM PC 的 system prompt（动态）：规则 + 世界状态 + 本轮关键词 */
+export function buildPcSystemPrompt(
+  roleName: string,
+  world: WorldState,
+  keywords: string[],
+  round: number,
+): string {
+  const kw = keywords.length ? keywords.map((k) => `「${k}」`).join(' ') : '（无）'
+  return [
+    PC_SYSTEM_PROMPT,
+    `## 你的角色\n你是 PC「${roleName}」。当前第 ${round} 轮。`,
+    `## 世界状态（唯一事实源）\n\`\`\`json\n${JSON.stringify(world, null, 2)}\n\`\`\``,
+    `## 本轮你的关键词（每一个都要有痕迹）\n${kw}`,
+  ].join('\n\n')
+}
+
+/** LLM PC 的行动请求 user 消息 */
+export function buildPcActionUser(sceneNarrative: string): string {
+  return [
+    `## 当前场景（KP 最新的叙述）\n${sceneNarrative || '（游戏刚开始，尚无场景描述）'}`,
+    `请写出你的回应。`,
+  ].join('\n\n')
+}
+
+/** 被驳回后的重写请求（会话历史里已保留被驳回的尝试） */
+export function buildPcRetryUser(sceneNarrative: string, reason: string): string {
+  return [
+    `## 当前场景（KP 最新的叙述）\n${sceneNarrative || '（游戏刚开始，尚无场景描述）'}`,
+    `你上一次的回应被 Validator 驳回，理由：${reason}`,
+    `请换一种写法重新回应，确保每一个关键词都有痕迹、且不违反世界状态。`,
+  ].join('\n\n')
+}
+
+/** 本地玩家的「LLM 代写」一次性消息组（无会话状态；生成草稿供玩家修改后自行提交） */
+export function buildPcAssistMessages(
+  roleName: string,
+  world: WorldState,
+  keywords: string[],
+  round: number,
+  sceneNarrative: string,
+): Array<{ role: 'system' | 'user'; content: string }> {
+  return [
+    {
+      role: 'system',
+      content: `${buildPcSystemPrompt(roleName, world, keywords, round)}\n\n（当前任务：为这位人类玩家草拟一份回应，玩家会修改后使用。只输出草拟的回应文本。）`,
+    },
+    { role: 'user', content: buildPcActionUser(sceneNarrative) },
+  ]
+}

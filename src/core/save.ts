@@ -32,25 +32,24 @@ export type SaveFileV1 = {
   kpSession: SerializedSession
   /** Validator 无历史，只保存参数 */
   validatorSession: SerializedSession
+  /** LLM PC 会话（RoleId → 会话）。旧档无此字段 = 没有 LLM PC */
+  pcSessions?: Record<string, SerializedSession>
   books: BookMeta[]
 }
 
-export function buildSave(
-  name: string,
-  engine: EngineSnapshot,
-  kpSession: SerializedSession,
-  validatorSession: SerializedSession,
-  books: BookMeta[],
-): SaveFileV1 {
+export function buildSave(data: {
+  name: string
+  engine: EngineSnapshot
+  kpSession: SerializedSession
+  validatorSession: SerializedSession
+  pcSessions?: Record<string, SerializedSession>
+  books: BookMeta[]
+}): SaveFileV1 {
   return {
     app: SAVE_APP,
     version: SAVE_VERSION,
     savedAt: new Date().toISOString(),
-    name,
-    engine,
-    kpSession,
-    validatorSession,
-    books,
+    ...data,
   }
 }
 
@@ -75,6 +74,14 @@ export function isValidSave(v: unknown): v is SaveFileV1 {
     const s = v[key]
     if (!isObject(s) || !isObject(s.params) || typeof s.params.model !== 'string') return false
     if (!Array.isArray(s.messages)) return false
+  }
+  // pcSessions 可选；存在时逐个校验结构（读取边界归一化，旧档缺失字段照常通过）
+  if (v.pcSessions !== undefined) {
+    if (!isObject(v.pcSessions)) return false
+    for (const s of Object.values(v.pcSessions)) {
+      if (!isObject(s) || !isObject(s.params) || typeof s.params.model !== 'string') return false
+      if (!Array.isArray(s.messages)) return false
+    }
   }
   if (!Array.isArray(v.books) || v.books.length === 0) return false
   for (const b of v.books) {

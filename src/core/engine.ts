@@ -33,6 +33,7 @@ export type EngineEvent =
   | { type: 'kp-stream'; delta: string }
   | { type: 'kp-narrative'; narrative: string; opening: boolean }
   | { type: 'validator-done'; verdict: Verdict; pass: boolean }
+  | { type: 'pc-acting'; roleId: RoleId; roleName: string; active: boolean }
   | { type: 'error'; message: string; stage: string }
   | { type: 'mutated' }
 
@@ -398,27 +399,50 @@ export class GameEngine {
   // ===== 玩家行动收集与验证 =====
 
   private async collectValidatedAction(pc: RoleController): Promise<ValidatedAction | null> {
+    /** LLM PC 的连续失败计数（空回复或被驳回），达到上限暂停等待 UI 决定 */
+    let llmFailures = 0
+    const isLlmPc = pc.role.kind === 'pc' && pc.role.controller === 'llm'
     while (!this.stopped && !this.rerollApproved) {
       this.setPhase('await-action')
       this.abortController = new AbortController()
-      let resp: ControllerResponse
-      try {
-        const req: ActionRequest = {
-          kind: 'pc-act',
-          round: this.round,
-          world: this.world,
-          keywords: this.keywords[pc.role.id] ?? [],
-        }
-        resp = await pc.requestAction(req, this.abortController.signal)
-      } catch {
-        this.abortController = null
-        return null // 中止（重骰/停止）
+      const req: ActionRequest = {
+        kind: 'pc-act',
+        round: this.round,
+        world: this.world,
+        keywords: this.keywords[pc.role.id] ?? [],
+        sceneNarrative: this.currentSceneNarrative,
       }
+      let resp: ControllerResponse
+      this.emitPcActing(pc, true)
+      try {
+        resp = await pc.requestAction(req, this.abortController.signal)
+      } catch (err) {
+        this.abortController = null
+        this.emitPcActing(pc, false)
+        if (this.rerollApproved || this.stopped) return null
+        if (err instanceof DOMException && err.name === 'AbortError') return null // 中止（重骰/停止）
+        // LLM PC 生成失败：与 KP 失败同路的 interrupted 恢复（否则异常会被当中止静默吞掉）
+        this.emit({
+          type: 'error',
+          message: err instanceof Error ? err.message : String(err),
+          stage: 'pc-act',
+        })
+        this.setPhase('interrupted')
+        this.emit({ type: 'mutated' })
+        await this.waitForRetry()
+        continue
+      }
+      this.emitPcActing(pc, false)
       this.abortController = null
       const text = resp.text.trim()
-      if (!text) continue
+      if (!text) {
+        if (isLlmPc) llmFailures += 1
+        if (await this.pauseIfLlmExhausted(pc, llmFailures)) llmFailures = 0
+        continue
+      }
 
       this.addLog({ type: 'action', round: this.round, roleId: pc.role.id, roleName: pc.role.name, text })
+      pc.onApplied(req, text)
 
       this.setPhase('validating')
       const messages = buildValidatorMessages(this.world, this.currentSceneNarrative, this.keywords[pc.role.id] ?? [], {
@@ -457,11 +481,35 @@ export class GameEngine {
       this.emit({ type: 'mutated' })
       if (!pass) {
         pc.onRejected?.(verdict.reason)
+        if (isLlmPc) {
+          llmFailures += 1
+          if (await this.pauseIfLlmExhausted(pc, llmFailures)) llmFailures = 0
+        }
         continue
       }
       return { roleId: pc.role.id, roleName: pc.role.name, text }
     }
     return null
+  }
+
+  /** LLM PC 连续 3 次（空回复/被驳回）后暂停为 interrupted，等待 UI 重试或重骰；返回是否触发了暂停 */
+  private async pauseIfLlmExhausted(pc: RoleController, failures: number): Promise<boolean> {
+    if (failures < 3) return false
+    this.addLog({
+      type: 'warning',
+      round: this.round,
+      text: `${pc.role.name} 的行动连续 ${failures} 次未通过，已暂停：可重试生成或重骰本场景。`,
+    })
+    this.setPhase('interrupted')
+    this.emit({ type: 'mutated' })
+    await this.waitForRetry()
+    return true
+  }
+
+  /** LLM PC 生成期间发事件（UI 显示「正在行动」并禁用本地输入） */
+  private emitPcActing(pc: RoleController, active: boolean): void {
+    if (pc.role.kind !== 'pc' || pc.role.controller !== 'llm') return
+    this.emit({ type: 'pc-acting', roleId: pc.role.id, roleName: pc.role.name, active })
   }
 
   // ===== 重骰（全体同意） =====
