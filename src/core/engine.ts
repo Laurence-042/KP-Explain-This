@@ -435,7 +435,6 @@ export class GameEngine {
           },
           messages,
           this.keywords[pc.role.id] ?? [],
-          text,
         )
       } catch {
         verdict = null

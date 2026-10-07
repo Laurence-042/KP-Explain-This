@@ -3,8 +3,8 @@ import { asVerdict, verdictPass } from './validator'
 
 const kws = ['knife', 'winter', 'debt']
 
-describe('asVerdict（宽松即兴标准）', () => {
-  it('完整合法输入', () => {
+describe('asVerdict（用人不疑：逐字采用模型结论）', () => {
+  it('完整合法输入原样通过', () => {
     const v = asVerdict(
       {
         valid: true,
@@ -13,7 +13,6 @@ describe('asVerdict（宽松即兴标准）', () => {
         reason: 'ok',
       },
       kws,
-      '我握着刀走过冬夜。',
     )
     expect(v).toEqual({
       valid: true,
@@ -23,96 +22,73 @@ describe('asVerdict（宽松即兴标准）', () => {
     })
   })
 
-  it('关键词字面出现在行动里 ⇒ 强制算使用（模型判 false 也不算数）', () => {
+  it('模型判 false 就算 false——即使关键词字面出现在行动里也不改写', () => {
+    // 校准只在 prompt 层做；代码不替模型翻案（用户产品决策：用人不疑）
     const v = asVerdict(
       {
         valid: false,
-        keyword_usage: { knife: false, winter: false },
+        keyword_usage: { knife: false, winter: false, debt: true },
         world_consistent: true,
-        reason: '模型觉得固定短语不算',
+        reason: '模型认为未实质使用',
       },
       kws,
-      '我攥紧手里的 knife，在 winter 的寒风里发抖。',
     )!
-    // knife/winter：字面出现压过模型的 false；debt：模型没判定 → 视为使用
-    expect(v.keyword_usage).toEqual({ knife: true, winter: true, debt: true })
+    expect(v.keyword_usage).toEqual({ knife: false, winter: false, debt: true })
   })
 
-  it('字面匹配大小写不敏感', () => {
+  it('keyword_usage 大小写不敏感匹配 key，值原样采用', () => {
     const v = asVerdict(
-      { valid: true, keyword_usage: { knife: false }, world_consistent: true },
+      { valid: false, keyword_usage: { Knife: false, WINTER: true, debt: true }, world_consistent: true },
       kws,
-      '那把 KNIFE 就在桌上。',
     )!
-    expect(v.keyword_usage.knife).toBe(true)
+    expect(v.keyword_usage).toEqual({ knife: false, winter: true, debt: true })
   })
 
-  it('模型未判定的关键词视为已使用（缺席 ≠ 驳回）', () => {
-    const v = asVerdict(
-      { valid: false, keyword_usage: { Knife: true }, world_consistent: true },
-      kws,
-      '我往前走。',
-    )!
-    expect(v.keyword_usage).toEqual({ knife: true, winter: true, debt: true })
+  it('keyword_usage 缺关键词 → 判定不完整返回 null（不替模型猜）', () => {
+    expect(asVerdict({ valid: true, keyword_usage: { knife: true }, world_consistent: true }, kws)).toBeNull()
   })
 
-  it('world_consistent 缺省视为一致，只有明确 false 才算不一致', () => {
-    const v = asVerdict({ valid: true, keyword_usage: {} }, kws, '行动')!
-    expect(v.world_consistent).toBe(true)
-    const v2 = asVerdict(
-      { valid: true, keyword_usage: {}, world_consistent: false },
-      kws,
-      '行动',
-    )!
-    expect(v2.world_consistent).toBe(false)
-  })
-
-  it('valid 缺失或类型错误返回 null', () => {
-    expect(asVerdict({ keyword_usage: {} }, kws, 'x')).toBeNull()
-    expect(asVerdict({ valid: 'yes' }, kws, 'x')).toBeNull()
-    expect(asVerdict('junk', kws, 'x')).toBeNull()
+  it('world_consistent 缺失 → null；valid 缺失或类型错误 → null', () => {
+    expect(asVerdict({ valid: true, keyword_usage: { knife: true } }, kws)).toBeNull()
+    expect(asVerdict({ keyword_usage: {} }, kws)).toBeNull()
+    expect(asVerdict({ valid: 'yes' }, kws)).toBeNull()
+    expect(asVerdict('junk', kws)).toBeNull()
   })
 
   it('reason 缺省时给出兜底文案', () => {
-    const v = asVerdict({ valid: true, keyword_usage: {} }, kws, '行动')!
+    const v = asVerdict(
+      { valid: true, keyword_usage: { knife: true, winter: true, debt: true }, world_consistent: true },
+      kws,
+    )!
     expect(v.reason).toContain('未给出理由')
   })
 })
 
-describe('verdictPass（不参考 valid 聚合字段，以明细为准）', () => {
-  const base = { valid: true, world_consistent: true, reason: '' }
+describe('verdictPass（三个结论字段都是模型给的）', () => {
+  const usage = { knife: true, winter: true, debt: true }
 
-  it('全部关键词使用且世界一致则通过', () => {
-    expect(
-      verdictPass({ ...base, keyword_usage: { knife: true, winter: true, debt: true } }),
-    ).toBe(true)
+  it('valid 且全部关键词使用且世界一致才通过', () => {
+    expect(verdictPass({ valid: true, keyword_usage: usage, world_consistent: true, reason: '' })).toBe(true)
   })
 
-  it('任一关键词明确未使用且未字面出现则拒绝', () => {
+  it('valid=false 拒绝', () => {
+    expect(verdictPass({ valid: false, keyword_usage: usage, world_consistent: true, reason: '' })).toBe(false)
+  })
+
+  it('任一关键词 false 拒绝', () => {
     expect(
-      verdictPass({ ...base, keyword_usage: { knife: true, winter: false, debt: true } }),
+      verdictPass({
+        valid: true,
+        keyword_usage: { knife: true, winter: false, debt: true },
+        world_consistent: true,
+        reason: '',
+      }),
     ).toBe(false)
   })
 
   it('世界不一致拒绝', () => {
     expect(
-      verdictPass({
-        valid: true,
-        world_consistent: false,
-        reason: '',
-        keyword_usage: { knife: true, winter: true, debt: true },
-      }),
+      verdictPass({ valid: true, keyword_usage: usage, world_consistent: false, reason: '' }),
     ).toBe(false)
-  })
-
-  it('valid=false 但关键词与世界明细都通过 ⇒ 放行（聚合字段常被模型填得过严）', () => {
-    expect(
-      verdictPass({
-        valid: false,
-        world_consistent: true,
-        reason: '',
-        keyword_usage: { knife: true, winter: true, debt: true },
-      }),
-    ).toBe(true)
   })
 })

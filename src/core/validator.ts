@@ -4,39 +4,35 @@ import { parseVerdictJson } from './json-out'
 import { validatorRetryPrefix } from './prompts'
 
 /**
- * 宽松即兴标准的代码兜底（用户产品决策，2026-10 第二次校准）：
- * - 关键词字面出现在玩家行动里 ⇒ 必然算使用（覆盖模型"固定短语不算/没因果不算"的过严倾向）
- * - 模型没对该关键词给出判定 ⇒ 视为使用（缺席 ≠ 驳回）
- * - world_consistent 只有明确写 false 才算不一致
- * - valid 字段不参与门槛：判定由关键词明细 + 世界一致性两个实质字段构成
+ * 用人不疑：判定结论全部逐字采用 LLM Validator 的输出，代码不改写、不补默认值。
+ * 宽松/严格的校准只发生在 prompt 层（prompts.ts 的即兴标准与判例锚点）。
+ * 输出不完整（缺 valid / world_consistent / keyword_usage 未覆盖全部关键词）
+ * 视为坏判定 → 重试一次，仍失败则按调用失败处理。
  */
-function literalHit(actionText: string, keyword: string): boolean {
-  const k = keyword.trim().toLowerCase()
-  return k.length > 0 && actionText.toLowerCase().includes(k)
-}
-
-/** 把未知的 JSON 值清洗成 Verdict；结构不符返回 null */
-export function asVerdict(raw: unknown, keywords: string[], actionText: string): Verdict | null {
+export function asVerdict(raw: unknown, keywords: string[]): Verdict | null {
   if (typeof raw !== 'object' || raw === null) return null
   const v = raw as Record<string, unknown>
   if (typeof v.valid !== 'boolean') return null
+  if (typeof v.world_consistent !== 'boolean') return null
 
-  const usage: Record<string, boolean> = {}
   const rawUsage =
     typeof v.keyword_usage === 'object' && v.keyword_usage !== null
       ? (v.keyword_usage as Record<string, unknown>)
       : {}
+  const usage: Record<string, boolean> = {}
   for (const kw of keywords) {
     // 尝试原词与大小写变体匹配
     const hit =
       findKey(rawUsage, kw) ?? findKey(rawUsage, kw.toLowerCase()) ?? findKey(rawUsage, kw.toUpperCase())
-    usage[kw] = literalHit(actionText, kw) || (hit === undefined ? true : rawUsage[hit] === true)
+    // 模型没给结论的关键词不猜：整个判定视为不完整，交由上层重试
+    if (hit === undefined || typeof rawUsage[hit] !== 'boolean') return null
+    usage[kw] = rawUsage[hit]
   }
 
   return {
     valid: v.valid,
     keyword_usage: usage,
-    world_consistent: v.world_consistent !== false,
+    world_consistent: v.world_consistent,
     reason:
       typeof v.reason === 'string' && v.reason.trim()
         ? v.reason.trim()
@@ -52,14 +48,10 @@ function findKey(map: Record<string, unknown>, key: string): string | undefined 
   return Object.keys(map).find((k) => k.toLowerCase() === lower)
 }
 
-/**
- * 判定是否放行：全部关键词已使用 且 世界一致。
- * 不再看 valid 聚合字段——它由关键词明细与世界一致性派生，模型往往把它填得
- * 比自己的明细更保守（"要完美匹配才 true"），实质判定以明细为准。
- */
+/** 判定是否放行：valid 且全部关键词已使用 且 与世界状态一致（三者都是 Validator 的结论） */
 export function verdictPass(verdict: Verdict): boolean {
   const allUsed = Object.values(verdict.keyword_usage).every(Boolean)
-  return allUsed && verdict.world_consistent
+  return verdict.valid && allUsed && verdict.world_consistent
 }
 
 export type ValidationRunOptions = {
@@ -69,15 +61,14 @@ export type ValidationRunOptions = {
 }
 
 /**
- * 运行一次完整验证（最多两次尝试：JSON 解析失败会带着错误提示重试一次）。
- * 返回 null 表示两次都拿不到合法 JSON（网络/模型问题交由调用方处理错误）。
+ * 运行一次完整验证（最多两次尝试：JSON 解析失败或判定不完整会带着错误提示重试一次）。
+ * 返回 null 表示两次都拿不到完整判定（网络/模型问题交由调用方处理错误）。
  */
 export async function runValidation(
   client: LLMClient,
   opts: ValidationRunOptions,
   messages: ChatMessage[],
   keywords: string[],
-  actionText: string,
 ): Promise<Verdict | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
     const payload = attempt === 0 ? messages : injectRetry(messages)
@@ -96,7 +87,7 @@ export async function runValidation(
       return null
     }
     const parsed = parseVerdictJson(raw)
-    const verdict = asVerdict(parsed, keywords, actionText)
+    const verdict = asVerdict(parsed, keywords)
     if (verdict) return verdict
   }
   return null
@@ -107,7 +98,7 @@ function injectRetry(messages: ChatMessage[]): ChatMessage[] {
   const last = messages[messages.length - 1]
   const retryUser: ChatMessage = {
     role: 'user',
-    content: `${validatorRetryPrefix('JSON 格式错误')}\n\n${last?.content ?? ''}`,
+    content: `${validatorRetryPrefix('JSON 格式错误，或 valid / world_consistent / keyword_usage 未覆盖全部玩家关键词')}\n\n${last?.content ?? ''}`,
   }
   return [...messages.slice(0, -1), retryUser]
 }
