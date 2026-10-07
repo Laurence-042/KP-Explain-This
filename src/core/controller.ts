@@ -1,6 +1,8 @@
 import type { RoleDef, WorldState } from './types'
 import type { LLMSession } from './llm/session'
+import { parseKpOutput } from './json-out'
 import {
+  buildKpRepairMessages,
   buildKpResolveUser,
   buildKpSceneOpening,
   buildKpSystemPrompt,
@@ -225,6 +227,9 @@ export abstract class BaseLlmController implements RoleController {
 
 /** KP：场景叙事 + state_changes */
 export class LlmKpController extends BaseLlmController {
+  /** 修复后的完整协议输出（叙事+JSON）；onApplied 时写回历史让模型模仿正确格式 */
+  private lastFormatted: string | null = null
+
   async requestAction(req: ActionRequest, signal: AbortSignal): Promise<ControllerResponse> {
     this.session.params.systemPrompt = () =>
       buildKpSystemPrompt(req.world, req.keywords, req.round)
@@ -237,12 +242,43 @@ export class LlmKpController extends BaseLlmController {
       signal,
       stage: req.kind === 'kp-respond' ? 'kp-resolve' : 'kp-scene',
     })
-    return { text }
+    const formatted = await this.repairMissingChanges(text, signal)
+    this.lastFormatted = formatted === text ? null : formatted
+    return { text: formatted }
   }
 
   onApplied(_req: ActionRequest, appliedText: string): void {
-    // 引擎已完成解析与日志，历史只保留纯叙事（去掉 JSON 块，节省上下文）
-    this.session.amendLastAssistant(appliedText)
+    // 引擎已完成解析与日志。历史保留完整协议格式（叙事+JSON）：纯叙事历史会让
+    // 模型模仿自己而持续漏掉 JSON 块（deepseek-flash 等常见），保留格式即持续教学
+    this.session.amendLastAssistant(this.lastFormatted ?? appliedText)
+    this.lastFormatted = null
+  }
+
+  /**
+   * 轻量级模型（如 flash 档）经常只写叙事、漏掉尾部 JSON 块。
+   * 检测到缺失时补一次一次性提取请求（不入会话历史、失败则原样返回交由引擎告警），
+   * 把结果重组成协议格式。
+   */
+  private async repairMissingChanges(raw: string, signal: AbortSignal): Promise<string> {
+    const first = parseKpOutput(raw)
+    if (first.stateChangesRaw !== null || signal.aborted) return raw
+    let repaired: string
+    try {
+      repaired = await this.session.client.complete(
+        {
+          model: this.session.params.model,
+          messages: buildKpRepairMessages(first.narrative),
+          temperature: 0,
+        },
+        'kp-repair',
+        signal,
+      )
+    } catch {
+      return raw
+    }
+    const parsed = parseKpOutput(repaired)
+    if (parsed.stateChangesRaw === null) return raw
+    return `${first.narrative}\n\n\`\`\`json\n${JSON.stringify(parsed.stateChangesRaw, null, 2)}\n\`\`\``
   }
 }
 

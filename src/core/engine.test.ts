@@ -550,3 +550,42 @@ describe('GameEngine：LLM PC（控制器三变种的 LLM-PC 形态）', () => {
     }
   })
 })
+
+describe('GameEngine：KP 漏输出 state_changes 的自动修复', () => {
+  const NARRATIVE_ONLY = '雪夜的巷子里，债主的脚步声越来越近，你贴着墙屏住呼吸。（模型忘记输出 JSON）'
+
+  it('缺块 → 一次性提取请求补块 → 状态生效、无告警、历史保留完整格式', async () => {
+    const ctx = makeGame([NARRATIVE_ONLY, KP_RESOLVE_REPLY])
+    ;(ctx.mocks.kpClient as unknown as Record<string, unknown>).complete = async () =>
+      '```json\n{"location": "雪夜小巷", "facts_added": ["债主正在逼近"]}\n```'
+    await start(ctx.engine, [ctx.kp, ctx.human], ctx.books)
+    await waitFor(() => ctx.human.awaitingAction)
+
+    expect(ctx.engine.world.location).toBe('雪夜小巷')
+    expect(ctx.engine.world.facts).toContain('债主正在逼近')
+    expect(
+      ctx.engine.log.some((l) => l.type === 'warning' && l.text.includes('没有找到 state_changes')),
+    ).toBe(false)
+    // 会话历史保留「叙事 + JSON」完整协议格式，供模型后续模仿
+    const last = ctx.kpSession.messages[ctx.kpSession.messages.length - 1]
+    expect(last.role).toBe('assistant')
+    expect(last.content).toContain('```json')
+    ctx.engine.stop()
+  })
+
+  it('修复请求也失败 → 维持原告警、历史为纯叙事', async () => {
+    const ctx = makeGame([NARRATIVE_ONLY])
+    ;(ctx.mocks.kpClient as unknown as Record<string, unknown>).complete = async () => {
+      throw new Error('HTTP 500')
+    }
+    await start(ctx.engine, [ctx.kp, ctx.human], ctx.books)
+    await waitFor(() => ctx.human.awaitingAction)
+
+    expect(
+      ctx.engine.log.some((l) => l.type === 'warning' && l.text.includes('没有找到 state_changes')),
+    ).toBe(true)
+    const last = ctx.kpSession.messages[ctx.kpSession.messages.length - 1]
+    expect(last.content).not.toContain('```json')
+    ctx.engine.stop()
+  })
+})

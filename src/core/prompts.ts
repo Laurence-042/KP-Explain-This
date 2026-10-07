@@ -39,7 +39,7 @@ export const KP_SYSTEM_PROMPT = `你是一场即兴叙事游戏的 KP（游戏�
 }
 \`\`\`
 
-说明：只包含发生变化的字段；没有变化就输出空的 state_changes 对象。
+说明：只包含发生变化的字段；没有变化就输出空的 state_changes 对象。**这个 JSON 块是系统的机器可读输出，缺失会导致状态解析失败**——哪怕没有任何状态变化，也必须在结尾输出 \`\`\`json\n{"state_changes": {}}\n\`\`\`。
 
 ## 场景收尾（重要）
 每个场景都应当有清晰的收束点。当本场景的核心冲突/目标已经解决、或剧情自然到达一个停顿点（悬念留白）时，把 scene_end 设为 true，系统会自动翻页进入下一轮。不要为了拖长而迟迟不收尾——单个场景通常在 3~6 次玩家行动内收束。
@@ -128,6 +128,23 @@ export function buildValidatorMessages(
 /** Validator JSON 解析失败时的重试消息前缀 */
 export function validatorRetryPrefix(errorHint: string): string {
   return `你上一次的输出无法解析为 JSON（${errorHint}）。请重新输出、且只输出符合格式的 JSON 对象。`
+}
+
+/**
+ * KP 忘记输出 state_changes 块时的修复请求（一次性、不入 KP 会话历史）：
+ * 让模型从刚生成的叙事里提取状态变化，只回一个 JSON 块。
+ */
+export function buildKpRepairMessages(narrative: string): Array<{ role: 'system' | 'user'; content: string }> {
+  return [
+    {
+      role: 'system',
+      content: `你是 JSON 提取器。根据给定的叙事文本提取状态变化，只输出一个 \`\`\`json 围栏块，不要输出任何其他文字。字段（只包含发生变化的）：location、time、scene、inventory_added、inventory_removed、npc_changes、player_changes、facts_added、events_added、plot_variables、scene_end。外层包一层 state_changes；没有变化就输出 {"state_changes": {}}。`,
+    },
+    {
+      role: 'user',
+      content: `叙事原文：\n${narrative}\n\n请输出对应的 state_changes JSON 块。`,
+    },
+  ]
 }
 
 // ===== LLM PC（以玩家身份行动）与本地玩家的「LLM 代写」=====
