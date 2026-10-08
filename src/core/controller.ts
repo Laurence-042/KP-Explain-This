@@ -3,7 +3,6 @@ import type { LLMSession } from './llm/session'
 import { parseKpOutput } from './json-out'
 import {
   buildKpRepairMessages,
-  buildKpResolveUser,
   buildKpSceneOpening,
   buildKpSystemPrompt,
   buildPcActionUser,
@@ -19,13 +18,7 @@ import {
  * 引擎只面向 RoleController 编排，不关心背后是谁。
  */
 
-export type ActionRequestKind =
-  /** KP：开启新场景 */
-  | 'kp-scene'
-  /** KP：响应已通过验证的玩家行动 */
-  | 'kp-respond'
-  /** PC：描述一次行动 */
-  | 'pc-act'
+export type ActionRequestKind = 'kp-scene' | 'pc-act'
 
 export type ActionRequest = {
   kind: ActionRequestKind
@@ -34,12 +27,10 @@ export type ActionRequest = {
   world: WorldState
   /** 该角色的本轮关键词 */
   keywords: string[]
-  /** kp-respond：已验证行动 */
-  validatedAction?: { roleId: string; roleName: string; text: string }
-  /** 本场景还未得到行动机会的 PC，供 KP 留出叙事空间 */
-  remainingPcNames?: string[]
   /** kp-scene：上一场景结尾（衔接用） */
   lastNarrative?: string
+  /** 已通过验证、尚待 KP 裁决的行动；开场承接或后行动 PC 参考 */
+  priorActions?: Array<{ roleId: string; roleName: string; text: string }>
   /** pc-act：KP 最新的场景叙述（LLM PC 据此回应；人类控制器忽略） */
   sceneNarrative?: string
   /** 流式增量回调（LLM 控制器透传） */
@@ -235,18 +226,11 @@ export class LlmKpController extends BaseLlmController {
   async requestAction(req: ActionRequest, signal: AbortSignal): Promise<ControllerResponse> {
     this.session.params.systemPrompt = () =>
       buildKpSystemPrompt(req.world, req.keywords, req.round)
-    const userMessage =
-      req.kind === 'kp-respond' && req.validatedAction
-        ? buildKpResolveUser(
-            { roleId: req.validatedAction.roleId, text: req.validatedAction.text },
-            req.validatedAction.roleName,
-            req.remainingPcNames ?? [],
-          )
-        : buildKpSceneOpening(req.round, req.lastNarrative)
+    const userMessage = buildKpSceneOpening(req.round, req.lastNarrative, req.priorActions)
     const text = await this.session.send(userMessage, {
       onChunk: req.onStream,
       signal,
-      stage: req.kind === 'kp-respond' ? 'kp-resolve' : 'kp-scene',
+      stage: 'kp-scene',
     })
     const formatted = await this.repairMissingChanges(text, req, signal)
     this.lastFormatted = formatted === text ? null : formatted
@@ -273,7 +257,7 @@ export class LlmKpController extends BaseLlmController {
       repaired = await this.session.client.complete(
         {
           model: this.session.params.model,
-          messages: buildKpRepairMessages(first.narrative, req.world, req.validatedAction?.roleId),
+          messages: buildKpRepairMessages(first.narrative, req.world),
           temperature: 0,
         },
         'kp-repair',
@@ -297,8 +281,8 @@ export class LlmPcController extends BaseLlmController {
       buildPcSystemPrompt(this.role.name, req.world, req.keywords, req.round)
     const narrative = req.sceneNarrative ?? ''
     const userMessage = this.lastRejection
-      ? buildPcRetryUser(narrative, this.lastRejection)
-      : buildPcActionUser(narrative)
+      ? buildPcRetryUser(narrative, this.lastRejection, req.priorActions)
+      : buildPcActionUser(narrative, req.priorActions)
     this.lastRejection = null
     let text: string
     try {

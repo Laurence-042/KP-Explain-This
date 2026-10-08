@@ -25,14 +25,14 @@ RoleController 三变种（本地 / LLM / 在线占位）：
    ↕ requestAction / requestRerollConsent / sceneCheckpoint·Restore
 GameEngine（纯编排，validator 为系统服务）
    ├─ rollRound: 掷骰（BookDocument 页模型）→ 关键词 + 下一页（按落词阅读顺序组合 1d10^K mod 总页数）；建重骰回滚点
-   ├─ kpAct: KP 输出（markdown 叙事 + ```json state_changes``` 围栏）
-   │    → json-out.parseKpOutput 容错拆分 → world 清洗合并 → scene_end 检测
+   ├─ kpAct: 每轮一次 KP 输出（先裁决上轮所有已验证行动，再展开新场景；markdown 叙事 + ```json state_changes``` 围栏）
+   │    → json-out.parseKpOutput 容错拆分 → world 清洗合并
    ├─ collectValidatedAction: PC 行动（pc-act 请求携带 sceneNarrative 供 LLM PC 读取；
    │    LLM PC 生成失败→interrupted 重试、连续 3 次空回复/驳回→interrupted 护栏；
    │    pc-acting 事件驱动 UI「正在行动」chip 并禁用本地输入）
    │    → Validator（无状态，上下文每次重建）
-   │    → verdictPass（valid && 全关键词 && 世界一致，逐字采用）→ 通过才转 KP
-   ├─ scene_end=true → 等本场景每位 PC 至少行动一次 → finishScene 自动翻页 → 下一轮（没有手动结束入口）
+   │    → verdictPass（valid && 全关键词 && 世界一致，逐字采用）→ 通过后记录给本轮后行动 PC 参考，并在下一轮交给 KP
+   ├─ 每位 PC 各行动一次 → finishScene 自动翻页 → 下一轮（不依赖 scene_end；没有手动结束入口）
    └─ requestReroll: 全体同意（LLM 角色恒同意）→ doReroll 回滚 world/log/控制器历史
         → **跳过本轮**（翻到 pendingNextPages 骰面指示页）→ 新页重掷重开
 ```

@@ -25,11 +25,11 @@ export const KP_SYSTEM_PROMPT = `你是一场即兴叙事游戏的 KP（游戏�
 - 场景：location、time、scene 为字符串；scene_end 为布尔值。
 - 记录：facts_added、events_added 为字符串数组；plot_variables 的值只能是字符串、数字或布尔值。
 - 角色状态：player_changes 以【世界状态.players】中的实际角色 ID 为键，值是状态对象；npc_changes 以 NPC ID 为键。状态值只用字符串、数字或布尔值，不嵌套对象。
-- 物品：回应某位玩家行动时，inventory_added / inventory_removed 是该行动者获得 / 失去的字符串数组；开场或涉及其他角色时，用 inventory_changes 按实际角色 ID 写 {"added": [...], "removed": [...]}。物品不要放进 player_changes。
+- 物品：用 inventory_changes 按实际角色 ID 写 {"added": [...], "removed": [...]}。物品不要放进 player_changes。旧格式 inventory_added / inventory_removed 仅用于单玩家兼容，多玩家场景不要使用。
 
 以下只演示 JSON 结构，不提供剧情、道具或状态建议。尖括号是占位说明，实际输出时必须换成当前叙事中的真实值；没有对应变化就省略字段：
 1. 开场给指定角色物品：{"state_changes":{"inventory_changes":{"<实际角色ID>":{"added":["<已叙述的物品名>"]}}}}
-2. 玩家行动后，行动者失去物品且角色状态变化：{"state_changes":{"inventory_removed":["<已失去的物品名>"],"player_changes":{"<实际角色ID>":{"status":"<已叙述的新状态>"}}}}
+2. 玩家行动后，指定角色失去物品且角色状态变化：{"state_changes":{"inventory_changes":{"<实际角色ID>":{"removed":["<已失去的物品名>"]}},"player_changes":{"<实际角色ID>":{"status":"<已叙述的新状态>"}}}}
 3. 没有状态变化：{"state_changes":{}}
 
 这三种结构互不要求同时出现。无论有无变化，结尾都必须输出一个机器可读的 JSON 围栏块；不要把 JSON 混进叙事正文。无变化时完整格式如下：
@@ -37,12 +37,12 @@ export const KP_SYSTEM_PROMPT = `你是一场即兴叙事游戏的 KP（游戏�
 {"state_changes":{}}
 \`\`\`
 
-## 场景收尾（重要）
-每个场景都应当有清晰的收束点。当本场景的核心冲突/目标已经解决、或剧情自然到达一个停顿点（悬念留白）时，把 scene_end 设为 true，系统会自动翻页进入下一轮。不要为了拖长而迟迟不收尾——单个场景通常在 3~6 次玩家行动内收束。
+## 轮次节奏（重要）
+你每轮只叙述一次。随后每位玩家依次描述一次行动，系统自动翻页。下一轮开场时，你会收到上一轮所有已经验证的玩家行动；先裁决这些行动的结果与世界反应，再根据本轮 KP 关键词展开新场景。玩家描述的是意图，不能预设行动已经成功。scene_end 是旧协议兼容字段，无需输出。
 
 ## 判断规则
 - 场景开头：根据【KP 关键词】建立本场景的地点、事件与张力，让关键词成为场景的驱动力。
-- 玩家行动之后：描述行动的结果与世界反应，保持节奏，不要一次性解决所有悬念。`
+- 承接上一轮行动时：依次回应各玩家的行动，再自然引入本轮的场景张力。`
 
 export const VALIDATOR_SYSTEM_PROMPT = `你是一个独立的规则 Validator，用于审查即兴叙事游戏中玩家的回应。你不是叙事者。这是一款即兴（improv）合作游戏——你的职责是挡住明显的违规，而不是审查回应的质量。**拿不准时一律放行（true）**：宁可放过，不可错杀。
 
@@ -91,21 +91,21 @@ export function buildKpSystemPrompt(world: WorldState, kpKeywords: string[], rou
 }
 
 /** 场景开场的 user 消息 */
-export function buildKpSceneOpening(round: number, openingHint?: string): string {
+export type PriorAction = { roleId: string; roleName: string; text: string }
+
+export function formatPriorActions(actions: PriorAction[] = []): string {
+  if (!actions.length) return ''
+  return `## 已通过验证、待 KP 裁决的玩家行动（按顺序）\n${actions.map((action, index) => `${index + 1}. ${action.roleName}（角色 ID：${action.roleId}）：${action.text}`).join('\n')}\n这些是玩家描述的意图，不代表已经成功。由 KP 裁决结果；物品变化请用 inventory_changes 按角色 ID 指定归属。`
+}
+
+export function buildKpSceneOpening(round: number, openingHint?: string, priorActions: PriorAction[] = []): string {
   return [
-    `【第 ${round} 轮 · 场景开始】请根据你的 KP 关键词开启一个新场景，衔接此前的剧情。`,
+    `【第 ${round} 轮 · 场景开始】${priorActions.length ? '先裁决上轮各玩家行动，再根据本轮 KP 关键词展开新场景。' : '请根据你的 KP 关键词开启一个新场景，衔接此前的剧情。'}`,
     openingHint ? `（上一场景结尾：${openingHint}）` : '',
+    formatPriorActions(priorActions),
   ]
     .filter(Boolean)
     .join('\n')
-}
-
-/** 已验证行动交由 KP 推进 */
-export function buildKpResolveUser(action: PlayerAction, roleName: string, remainingPcNames: string[] = []): string {
-  const turnNote = remainingPcNames.length
-    ? `本场景还有 ${remainingPcNames.join('、')} 尚未行动。请给他们留出接续空间，暂不要结束场景（scene_end 不要设为 true）。`
-    : '所有玩家在本场景都已有行动机会，可以按剧情自然决定是否收尾。'
-  return `【玩家行动（已通过 Validator 验证）】${roleName}（角色 ID：${action.roleId}）：${action.text}\n\n请描述这一行动的结果并推进剧情。inventory_added/inventory_removed 归属这个行动角色。${turnNote}`
 }
 
 /** Validator 的完整消息（无状态，每次重建） */
@@ -114,10 +114,12 @@ export function buildValidatorMessages(
   sceneNarrative: string,
   playerKeywords: string[],
   action: PlayerAction,
+  priorActions: PriorAction[] = [],
 ): Array<{ role: 'system' | 'user'; content: string }> {
   const userContent = [
     `## 世界状态（Canonical World State）\n\`\`\`json\n${JSON.stringify(world, null, 2)}\n\`\`\``,
     `## 当前场景（KP 最新的叙述）\n${sceneNarrative || '（游戏刚开始，尚无场景描述）'}`,
+    formatPriorActions(priorActions),
     `## 玩家关键词（宽松判定：字面出现或任何相关展开都算使用，只有完全无痕迹才 false）\n${playerKeywords.map((k) => `- ${k}`).join('\n') || '（无）'}`,
     `## 玩家行动（原文）\n${action.text}`,
     `请按宽松即兴标准输出 JSON 判定：拿不准时倾向放行。`,
@@ -185,20 +187,22 @@ export function buildPcSystemPrompt(
 }
 
 /** LLM PC 的行动请求 user 消息 */
-export function buildPcActionUser(sceneNarrative: string): string {
+export function buildPcActionUser(sceneNarrative: string, priorActions: PriorAction[] = []): string {
   return [
     `## 当前场景（KP 最新的叙述）\n${sceneNarrative || '（游戏刚开始，尚无场景描述）'}`,
+    formatPriorActions(priorActions),
     `请写出你的回应。`,
-  ].join('\n\n')
+  ].filter(Boolean).join('\n\n')
 }
 
 /** 被驳回后的重写请求（会话历史里已保留被驳回的尝试） */
-export function buildPcRetryUser(sceneNarrative: string, reason: string): string {
+export function buildPcRetryUser(sceneNarrative: string, reason: string, priorActions: PriorAction[] = []): string {
   return [
     `## 当前场景（KP 最新的叙述）\n${sceneNarrative || '（游戏刚开始，尚无场景描述）'}`,
+    formatPriorActions(priorActions),
     `你上一次的回应被 Validator 驳回，理由：${reason}`,
     `请换一种写法重新回应，确保每一个关键词都有痕迹、且不违反世界状态。`,
-  ].join('\n\n')
+  ].filter(Boolean).join('\n\n')
 }
 
 /** 本地玩家的「LLM 代写」一次性消息组（无会话状态；生成草稿供玩家修改后自行提交） */

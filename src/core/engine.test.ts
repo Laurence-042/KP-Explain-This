@@ -167,7 +167,7 @@ describe('GameEngine：控制器驱动循环', () => {
     ctx.engine.stop()
   })
 
-  it('人类控制器提交行动 → 验证通过 → KP 推进', async () => {
+  it('人类控制器提交行动 → 验证通过 → 下一轮 KP 承接', async () => {
     const ctx = makeGame([KP_SCENE_REPLY, KP_RESOLVE_REPLY])
     await start(ctx.engine, [ctx.kp, ctx.human], ctx.books)
     await waitFor(() => ctx.human.awaitingAction)
@@ -221,8 +221,8 @@ describe('GameEngine：控制器驱动循环', () => {
     ctx.engine.stop()
   })
 
-  it('scene_end 自动收尾：翻页进入下一轮并自动生成新场景', async () => {
-    const ctx = makeGame([KP_SCENE_REPLY, KP_RESOLVE_END_REPLY, KP_NEXT_SCENE_REPLY])
+  it('每位玩家行动一次后自动翻页，下一轮 KP 承接行动', async () => {
+    const ctx = makeGame([KP_SCENE_REPLY, KP_NEXT_SCENE_REPLY])
     await start(ctx.engine, [ctx.kp, ctx.human], ctx.books)
     await waitFor(() => ctx.human.awaitingAction)
 
@@ -230,6 +230,7 @@ describe('GameEngine：控制器驱动循环', () => {
     await waitFor(() => ctx.engine.round === 2 && ctx.human.awaitingAction)
 
     expect(ctx.engine.currentSceneNarrative).toContain('不该亮着的灯')
+    expect(ctx.kpSession.messages[2].content).toContain('我把门堵死')
     expect(ctx.engine.log.some((l) => l.type === 'system' && l.text.includes('场景结束'))).toBe(true)
     expect(ctx.events.some((ev) => ev.type === 'flip')).toBe(true)
     // 没有任何"主动结束场景"入口（引擎 API 面上不存在 endScene）
@@ -242,13 +243,11 @@ describe('GameEngine：重骰（全体同意）', () => {
   it('回滚本轮并跳过：翻到首轮骰面指示的页，在新页重掷并重新开场', async () => {
     // 多页书：让"跳过本轮翻页"可以被观察到（默认 100 词只有 1 页）
     const multiPageText = Array.from({ length: 1000 }, (_, i) => `w${String(i).padStart(3, '0')}`).join(' ')
-    const ctx = makeGame([KP_SCENE_REPLY, KP_RESOLVE_REPLY, KP_SCENE_REPLY], multiPageText)
+    const ctx = makeGame([KP_SCENE_REPLY, KP_SCENE_REPLY], multiPageText)
     await start(ctx.engine, [ctx.kp, ctx.human], ctx.books)
     await waitFor(() => ctx.human.awaitingAction)
 
-    ctx.human.submitText('我用 w000 撬开 w001 冻住的窗，躲开 w002。')
-    await waitFor(() => ctx.engine.world.location === '仓库')
-    await waitFor(() => ctx.human.awaitingAction)
+    // 在本轮尚未提交行动时重骰，回滚开场并跳到骰面指定页。
 
     const worldBeforeReroll = JSON.stringify(ctx.engine.world)
     const logBeforeReroll = ctx.engine.log.length
@@ -262,7 +261,7 @@ describe('GameEngine：重骰（全体同意）', () => {
 
     // 世界回滚到本轮开场后的状态并由新场景重建
     expect(ctx.engine.world.location).toBe('雪夜小巷')
-    expect(ctx.engine.world.inventory['pc-a']).toEqual([]) // 仓库钥匙被回滚
+    expect(ctx.engine.world.inventory['pc-a']).toEqual([])
     // 重骰 = 跳过本轮：书本翻到首轮骰面指示的页（重掷在新页取词）
     expect(ctx.engine.round).toBe(2)
     expect(ctx.engine.pages['kp']).toBe(pendingBefore['kp'])
@@ -273,8 +272,8 @@ describe('GameEngine：重骰（全体同意）', () => {
     expect(ctx.engine.log.some((l) => l.type === 'system' && l.text.includes('跳过'))).toBe(true)
     // KP 历史截断：本轮开场前 1 条（user+assistant 2 条）→ 重新开场后 = 2 条
     expect(ctx.kpSession.messages.length).toBe(2)
-    expect(kpMsgsBeforeReroll).toBeGreaterThan(2)
-    expect(worldBeforeReroll).toContain('仓库')
+    expect(kpMsgsBeforeReroll).toBe(2)
+    expect(worldBeforeReroll).toContain('雪夜小巷')
     ctx.engine.stop()
   })
 })
@@ -312,8 +311,8 @@ describe('GameEngine：中断与重试', () => {
 })
 
 describe('GameEngine：多 PC 扩展（同基类架构验证）', () => {
-  it('KP 在本地玩家行动后提前收尾，LLM PC 仍能在翻页前行动', async () => {
-    const ctx = makeGame([KP_SCENE_REPLY, KP_RESOLVE_END_REPLY, KP_RESOLVE_REPLY, KP_NEXT_SCENE_REPLY])
+  it('即使 KP 开场输出 scene_end，LLM PC 仍在本轮行动', async () => {
+    const ctx = makeGame([KP_RESOLVE_END_REPLY, KP_NEXT_SCENE_REPLY])
     const pcRole: RoleDef = { id: 'pc-llm-1', name: '玩家B', kind: 'pc', controller: 'llm', bookId: 'b1' }
     const pcClient = new LLMClient('http://fake/v1', 'key')
     let requests = 0
@@ -332,6 +331,8 @@ describe('GameEngine：多 PC 扩展（同基类架构验证）', () => {
       expect(requests).toBeGreaterThan(0)
       expect(ctx.engine.log.some((entry) => entry.type === 'action' && entry.roleId === 'pc-llm-1' && entry.round === 1)).toBe(true)
       expect(ctx.events.some((event) => event.type === 'pc-acting' && event.roleId === 'pc-llm-1' && event.active)).toBe(true)
+      expect(pcSession.messages[0].content).toContain('我推开门')
+      expect(ctx.engine.log.filter((entry) => entry.type === 'scene' && entry.round === 1)).toHaveLength(1)
     } finally {
       ctx.engine.stop()
     }
@@ -359,14 +360,18 @@ describe('GameEngine：多 PC 扩展（同基类架构验证）', () => {
       void resumed.resumeLoop()
       await waitFor(() => nextB.awaitingAction)
       expect(nextA.awaitingAction).toBe(false)
+      nextB.submitText('我从侧门进来。')
+      await waitFor(() => resumed.round === 2)
+      expect(kpSession.messages[2].content).toContain('我查看门外')
+      expect(kpSession.messages[2].content).toContain('我从侧门进来')
     } finally {
       resumed.stop()
     }
   })
 
-  it('两个真人 PC 依次行动，各自验证并推进', async () => {
-    const bResolve = '仓库的门在身后合拢，这一夜结束了。\n\n```json\n{"inventory_added":["铜铃"],"player_changes":{"awake":true},"scene_end":true}\n```'
-    const ctx = makeGame([KP_SCENE_REPLY, KP_RESOLVE_REPLY, bResolve, KP_NEXT_SCENE_REPLY])
+  it('两个真人 PC 依次行动，KP 仅在下一轮开场承接两人', async () => {
+    const nextOpening = '仓库里，A 撬窗引开了追兵，B 从侧门进来。\n\n```json\n{"inventory_changes":{"pc-a":{"added":["生锈的钥匙"]},"pc-b":{"added":["铜铃"]}},"player_changes":{"pc-b":{"awake":true}}}\n```'
+    const ctx = makeGame([KP_SCENE_REPLY, nextOpening])
     const pcB: RoleDef = { id: 'pc-b', name: '玩家B', kind: 'pc', controller: 'human', bookId: 'b1' }
     const humanB = new HumanController(pcB)
 
@@ -378,12 +383,18 @@ describe('GameEngine：多 PC 扩展（同基类架构验证）', () => {
     await waitFor(() => humanB.awaitingAction)
     expect(ctx.engine.log.some((l) => l.type === 'action' && l.roleId === 'pc-a')).toBe(true)
 
-    // PC B 行动（A 的行动已被 KP 处理）
+    // B 行动前没有第二次 KP 叙述。
     const narrativeAfterA = ctx.engine.currentSceneNarrative
+    expect(ctx.kpSession.messages).toHaveLength(2)
     humanB.submitText('玩家B：我从 w003 侧门溜进去。')
     await waitFor(() => ctx.human.awaitingAction && ctx.engine.round === 2)
     expect(ctx.engine.log.some((l) => l.type === 'action' && l.roleId === 'pc-b')).toBe(true)
-    expect(narrativeAfterA).toBeTruthy()
+    expect(narrativeAfterA).toContain('雪夜')
+    expect(ctx.kpSession.messages).toHaveLength(4)
+    expect(ctx.kpSession.messages[2].content).toContain('玩家A：我用 w000 撬窗')
+    expect(ctx.kpSession.messages[2].content).toContain('玩家B：我从 w003 侧门')
+    const firstRound = ctx.engine.log.filter((entry) => entry.round === 1 && (entry.type === 'scene' || entry.type === 'action'))
+    expect(firstRound.map((entry) => entry.type)).toEqual(['scene', 'action', 'action'])
     expect(ctx.engine.world.inventory['pc-a']).toContain('生锈的钥匙')
     expect(ctx.engine.world.inventory['pc-a']).not.toContain('铜铃')
     expect(ctx.engine.world.inventory['pc-b']).toContain('铜铃')
@@ -394,11 +405,10 @@ describe('GameEngine：多 PC 扩展（同基类架构验证）', () => {
 
 describe('GameEngine：快照恢复', () => {
   it('snapshot → 新引擎+新控制器 → restore + resumeLoop 后继续游戏', async () => {
-    const ctx = makeGame([KP_SCENE_REPLY, KP_RESOLVE_REPLY])
+    const ctx = makeGame([KP_SCENE_REPLY, KP_NEXT_SCENE_REPLY])
     await start(ctx.engine, [ctx.kp, ctx.human], ctx.books)
     await waitFor(() => ctx.human.awaitingAction)
-    ctx.human.submitText('我用 w000 撬开 w001 冻住的窗。')
-    await waitFor(() => ctx.engine.world.location === '仓库' && ctx.human.awaitingAction)
+    // 在 A 等待行动时保存，恢复后仍从 A 继续。
     ctx.engine.stop()
 
     const snap = ctx.engine.snapshot()
@@ -406,7 +416,7 @@ describe('GameEngine：快照恢复', () => {
 
     // 重建：新 client/session/controller/engine
     const mocks2 = makeMocks()
-    mocks2.setKpReplies([KP_RESOLVE_END_REPLY, KP_NEXT_SCENE_REPLY])
+    mocks2.setKpReplies([KP_NEXT_SCENE_REPLY])
     const kpSession2 = new LLMSession(mocks2.kpClient, { model: 'kp-model' })
     kpSession2.restore(kpSer)
     const kp2 = new LlmKpController(ctx.kpRole, kpSession2)
@@ -420,7 +430,7 @@ describe('GameEngine：快照恢复', () => {
     expect(engine2.keywords).toEqual(ctx.engine.keywords)
     expect(kpSession2.messages).toEqual(ctx.kpSession.messages)
 
-    // resumeLoop 续跑：行动 → KP 收尾（scene_end）→ 自动翻页 → 第 2 轮
+    // resumeLoop 续跑：行动 → 翻页 → 第 2 轮 KP 开场
     void engine2.resumeLoop().catch(() => {})
     await waitFor(() => human2.awaitingAction)
     human2.submitText('我锁上门休息。')
@@ -479,21 +489,21 @@ describe('GameEngine：LLM PC（控制器三变种的 LLM-PC 形态）', () => {
     return { engine, kpSession, pcSession, pcClient, events, mocks, pcReplies, startIt, stop }
   }
 
-  it('LLM PC 自主行动 → 验证通过 → KP 以其名义推进', async () => {
-    const ctx = makeLlmPcGame([KP_SCENE_REPLY, KP_RESOLVE_END_REPLY])
+  it('LLM PC 自主行动 → 验证通过 → 下一轮 KP 承接', async () => {
+    const ctx = makeLlmPcGame([KP_SCENE_REPLY, KP_NEXT_SCENE_REPLY])
     try {
       ctx.startIt()
-      // 场景收尾的叙事是稳定标记（location 会被下一轮开场改回，不能用）
+      // 下一轮 KP 开场是稳定标记。
       await waitFor(() =>
-        ctx.engine.log.some((l) => l.type === 'scene' && l.narrative.includes('结束了')),
+        ctx.engine.log.some((l) => l.type === 'scene' && l.round === 2),
       )
 
       const actionEntry = ctx.engine.log.find((l) => l.type === 'action')
       expect(actionEntry?.roleName).toBe('玩家B')
       expect(actionEntry?.text).toBe(PC_ACTION)
-      // KP 收到的已验证行动携带角色名
+      // KP 下一轮收到已验证行动与角色名。
       const resolveUser = ctx.kpSession.messages.find(
-        (m) => m.role === 'user' && m.content.includes('已通过 Validator 验证'),
+        (m) => m.role === 'user' && m.content.includes('待 KP 裁决的玩家行动'),
       )
       expect(resolveUser?.content).toContain('玩家B')
       expect(resolveUser?.content).toContain(PC_ACTION)

@@ -15,13 +15,13 @@ import { parseKpOutput } from './json-out'
 import { buildValidatorMessages } from './prompts'
 import { runValidation, verdictPass } from './validator'
 import type { LLMSession } from './llm/session'
-import type { ActionRequest, ActionRequestKind, ControllerResponse, RoleController } from './controller'
+import type { ActionRequest, ControllerResponse, RoleController } from './controller'
 
 /**
  * 游戏引擎（框架无关）：纯编排，只面向 RoleController 接口。
  * - KP 与 PC 都是 RoleController（LLM/人类/未来联机玩家同基类）
  * - Validator 是系统裁判（不是游戏角色），经 validatorSession 提供服务
- * - 场景只能由 KP 的 state_changes.scene_end 自然收尾（自动翻页进入下一轮）；
+ * - 每轮 KP 开场一次，每位 PC 各行动一次，随后自动翻页；下一轮 KP 承接这些行动。
  *   玩家侧唯一的主动操作是发起重骰，需要全体角色同意（LLM KP 默认同意）
  */
 
@@ -51,6 +51,10 @@ export type EngineSnapshot = {
   log: GameLogEntry[]
   currentSceneNarrative: string
   sceneEndHint: boolean
+  /** 上轮已验证的行动，待下一轮 KP 裁决；旧存档可缺省 */
+  pendingActions?: ValidatedAction[]
+  /** 本轮已经通过验证的行动；旧存档可缺省 */
+  sceneActions?: ValidatedAction[]
   /** 当前场景已通过验证并交给 KP 的玩家；旧存档可缺省 */
   actedRoleIds?: RoleId[]
   /** 下一位应行动的 PC 索引；旧存档可缺省 */
@@ -62,6 +66,7 @@ type RoundCheckpoint = {
   logLength: number
   narrative: string
   controllerCheckpoints: unknown[]
+  pendingActions: ValidatedAction[]
 }
 
 type ValidatedAction = { roleId: RoleId; roleName: string; text: string }
@@ -74,7 +79,6 @@ type NewLogEntry = DistributiveOmit<GameLogEntry, 'id'>
 
 const INTERRUPTIBLE_PHASES: ReadonlySet<GamePhase> = new Set([
   'kp-scene',
-  'kp-resolve',
   'interrupted',
 ])
 
@@ -111,10 +115,10 @@ export class GameEngine {
   private rerollApproved = false
   /** interrupted 状态下 UI 的决定通道 */
   private resume: (() => void) | null = null
-  private sceneEnded = false
-  private sceneEndPending = false
   private actedThisScene = new Set<RoleId>()
   private nextPcIndex = 0
+  private pendingActions: ValidatedAction[] = []
+  private sceneActions: ValidatedAction[] = []
 
   constructor(validatorSession: LLMSession, emit: (event: EngineEvent) => void) {
     this.validatorSession = validatorSession
@@ -174,9 +178,10 @@ export class GameEngine {
     this.rolls = {}
     this.currentSceneNarrative = ''
     this.sceneEndHint = false
-    this.sceneEndPending = false
     this.actedThisScene.clear()
     this.nextPcIndex = 0
+    this.pendingActions = []
+    this.sceneActions = []
     this.rerollApproved = false
     this.world = createInitialWorld(
       controllers.filter((c) => c.role.kind === 'pc').map((c) => ({ id: c.role.id, name: c.role.name })),
@@ -215,7 +220,7 @@ export class GameEngine {
   // ===== 主循环 =====
 
   /**
-   * 主循环：掷轮 → 场景开场 → 行动循环 → 自然收尾翻页 → 下一轮。
+   * 主循环：掷轮 → KP 开场 → 每位 PC 各行动一次 → 翻页 → 下一轮。
    * startWithRoll=false 用于存档恢复（跳过本轮掷骰与开场，直接续行动循环）。
    * 重骰 = 回滚并跳过本轮（doReroll 翻到骰面指示页）→ 新页重掷 → 新开场。
    */
@@ -223,7 +228,7 @@ export class GameEngine {
     while (!this.stopped) {
       if (startWithRoll) {
         await this.rollRound()
-        const opening = await this.stepWithRetry(() => this.kpAct('kp-scene'))
+        const opening = await this.stepWithRetry(() => this.kpAct())
         if (opening === 'rerolled') {
           this.doReroll()
           continue
@@ -241,37 +246,37 @@ export class GameEngine {
     }
   }
 
-  /** 已有场景的行动循环：逐 PC 收集行动 → 验证 → KP 推进，直到自然收尾/重骰/停止 */
+  /** 已有场景的行动循环：逐 PC 收集并验证一次行动，然后翻页。 */
   private async playSceneActions(): Promise<SceneResult> {
-    while (!this.sceneEnded && !this.stopped && !this.rerollApproved) {
-      const pcs = this.pcControllers
-      if (!pcs.length) return 'stopped'
-      const pc = pcs[this.nextPcIndex % pcs.length]
+    const pcs = this.pcControllers
+    if (!pcs.length) return 'stopped'
+    while (this.nextPcIndex < pcs.length && !this.stopped && !this.rerollApproved) {
+      const pc = pcs[this.nextPcIndex]
       const validated = await this.collectValidatedAction(pc)
       if (validated === null) break // 中断（重骰/停止）
       this.actedThisScene.add(pc.role.id)
-      const st = await this.stepWithRetry(() => this.kpAct('kp-respond', validated))
-      if (st === 'rerolled') return 'rerolled'
-      this.nextPcIndex = (this.nextPcIndex + 1) % pcs.length
+      this.sceneActions.push(validated)
+      this.nextPcIndex += 1
+      this.emit({ type: 'mutated' })
     }
     if (this.stopped) return 'stopped'
     if (this.rerollApproved) return 'rerolled'
-    return this.sceneEnded ? 'ended' : 'stopped'
+    return this.nextPcIndex >= pcs.length ? 'ended' : 'stopped'
   }
 
   /** 掷出本轮骰子并建立重骰回滚点 */
   private async rollRound(): Promise<void> {
     this.world.round = this.round
     this.sceneEndHint = false
-    this.sceneEnded = false
-    this.sceneEndPending = false
     this.actedThisScene.clear()
     this.nextPcIndex = 0
+    this.sceneActions = []
     this.checkpoint = {
       world: clone(this.world),
       logLength: this.log.length,
       narrative: this.currentSceneNarrative,
       controllerCheckpoints: this.controllers.map((c) => c.sceneCheckpoint()),
+      pendingActions: clone(this.pendingActions),
     }
     this.setPhase('rolling')
     for (const c of this.controllers) {
@@ -287,21 +292,18 @@ export class GameEngine {
   }
 
   /** 执行一次 KP 行动；返回 applied / aborted，不抛异常 */
-  private async kpAct(kind: ActionRequestKind, validatedAction?: ValidatedAction): Promise<'applied' | 'aborted'> {
+  private async kpAct(): Promise<'applied' | 'aborted'> {
     const kp = this.kpController
     if (!kp) return 'aborted'
-    this.setPhase(kind === 'kp-respond' ? 'kp-resolve' : 'kp-scene')
+    this.setPhase('kp-scene')
     this.abortController = new AbortController()
     const req: ActionRequest = {
-      kind,
+      kind: 'kp-scene',
       round: this.round,
       world: this.world,
       keywords: this.keywords[kp.role.id] ?? [],
-      validatedAction,
-      remainingPcNames: this.pcControllers
-        .filter((pc) => !this.actedThisScene.has(pc.role.id))
-        .map((pc) => pc.role.name),
-      lastNarrative: kind === 'kp-scene' ? this.currentSceneNarrative || undefined : undefined,
+      lastNarrative: this.currentSceneNarrative || undefined,
+      priorActions: this.pendingActions,
       onStream: (delta) => this.emit({ type: 'kp-stream', delta }),
     }
     this.busy = true
@@ -316,7 +318,7 @@ export class GameEngine {
         this.emit({
           type: 'error',
           message: err instanceof Error ? err.message : String(err),
-          stage: kind === 'kp-respond' ? 'kp-resolve' : 'kp-scene',
+          stage: 'kp-scene',
         })
       }
       // 用户中止/失败：弹出一条悬挂的 user 消息避免历史错位（KP 控制器重试前会重发）
@@ -329,9 +331,8 @@ export class GameEngine {
     this.abortController = null
 
     const parsed = parseKpOutput(resp.text)
-    const actingRoleId = validatedAction?.roleId ?? ''
     const playerIds = Object.keys(this.world.players)
-    const shorthandRoleId = actingRoleId || (playerIds.length === 1 ? playerIds[0] : '')
+    const shorthandRoleId = playerIds.length === 1 ? playerIds[0] : ''
     const { changes, warnings } = sanitizeStateChanges(
       parsed.stateChangesRaw,
       shorthandRoleId ? { players: this.world.players, actingRoleId: shorthandRoleId } : undefined,
@@ -342,18 +343,12 @@ export class GameEngine {
     for (const w of applyResult.warnings) this.addLog({ type: 'warning', round: this.round, text: w })
 
     this.currentSceneNarrative = parsed.narrative
-    this.addLog({ type: 'scene', round: this.round, opening: kind === 'kp-scene', narrative: parsed.narrative })
+    this.addLog({ type: 'scene', round: this.round, opening: true, narrative: parsed.narrative })
     kp.onApplied(req, parsed.narrative)
+    this.pendingActions = []
 
-    if (applyResult.sceneEnd) {
-      this.sceneEndPending = true
-      this.sceneEndHint = true
-    }
-    // KP 可以建议收尾，但在多玩家场景中每位 PC 至少有一次行动机会。
-    if (this.sceneEndPending && this.pcControllers.every((pc) => this.actedThisScene.has(pc.role.id))) {
-      this.sceneEnded = true
-    }
-    this.emit({ type: 'kp-narrative', narrative: parsed.narrative, opening: kind === 'kp-scene' })
+    // 旧模型输出中的 scene_end 由 world 层解析，但轮次收尾只取决于全体 PC 行动完毕。
+    this.emit({ type: 'kp-narrative', narrative: parsed.narrative, opening: true })
     this.setPhase('await-action')
     this.emit({ type: 'mutated' })
     return 'applied'
@@ -434,6 +429,7 @@ export class GameEngine {
         world: this.world,
         keywords: this.keywords[pc.role.id] ?? [],
         sceneNarrative: this.currentSceneNarrative,
+        priorActions: this.sceneActions,
       }
       let resp: ControllerResponse
       this.emitPcActing(pc, true)
@@ -471,7 +467,7 @@ export class GameEngine {
       const messages = buildValidatorMessages(this.world, this.currentSceneNarrative, this.keywords[pc.role.id] ?? [], {
         roleId: pc.role.id,
         text,
-      })
+      }, this.sceneActions)
       let verdict: Verdict | null = null
       try {
         verdict = await runValidation(
@@ -585,13 +581,13 @@ export class GameEngine {
       this.world = cp.world
       this.log.length = cp.logLength
       this.currentSceneNarrative = cp.narrative
+      this.pendingActions = cp.pendingActions
       this.controllers.forEach((c, i) => c.sceneRestore(cp.controllerCheckpoints[i]))
     }
     this.sceneEndHint = false
-    this.sceneEnded = false
-    this.sceneEndPending = false
     this.actedThisScene.clear()
     this.nextPcIndex = 0
+    this.sceneActions = []
     this.rerollApproved = false
     this.resume = null
     for (const c of this.controllers) {
@@ -613,6 +609,7 @@ export class GameEngine {
 
   private async finishScene(): Promise<void> {
     this.setPhase('scene-end')
+    this.pendingActions = clone(this.sceneActions)
     for (const c of this.controllers) {
       const next = this.pendingNextPages[c.role.id]
       const prev = this.pages[c.role.id]
@@ -640,6 +637,8 @@ export class GameEngine {
       log: this.log,
       currentSceneNarrative: this.currentSceneNarrative,
       sceneEndHint: this.sceneEndHint,
+      pendingActions: clone(this.pendingActions),
+      sceneActions: clone(this.sceneActions),
       actedRoleIds: [...this.actedThisScene],
       nextPcIndex: this.nextPcIndex,
     }
@@ -661,15 +660,15 @@ export class GameEngine {
     this.world = snap.world
     this.log = snap.log
     this.currentSceneNarrative = snap.currentSceneNarrative
-    this.sceneEndHint = snap.sceneEndHint
-    this.sceneEndPending = snap.sceneEndHint
+    this.sceneEndHint = false
+    this.pendingActions = clone(snap.pendingActions ?? [])
+    this.sceneActions = clone(snap.sceneActions ?? [])
     this.actedThisScene = new Set(snap.actedRoleIds ?? [])
     this.nextPcIndex = snap.nextPcIndex ?? 0
     this.entrySeq = snap.log.length
     this.stopped = false
     this.busy = false
     this.rerollApproved = false
-    this.sceneEnded = false
     this.resume = null
     this.phase = this.normalizeRestorePhase(snap.phase)
     // 恢复后仍允许对本轮重骰：用当前状态重建回滚点
@@ -678,6 +677,7 @@ export class GameEngine {
       logLength: this.log.length,
       narrative: this.currentSceneNarrative,
       controllerCheckpoints: this.controllers.map((c) => c.sceneCheckpoint()),
+      pendingActions: clone(this.pendingActions),
     }
     this.emit({ type: 'mutated' })
   }
