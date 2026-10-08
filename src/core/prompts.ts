@@ -101,8 +101,11 @@ export function buildKpSceneOpening(round: number, openingHint?: string): string
 }
 
 /** 已验证行动交由 KP 推进 */
-export function buildKpResolveUser(action: PlayerAction, roleName: string): string {
-  return `【玩家行动（已通过 Validator 验证）】${roleName}（角色 ID：${action.roleId}）：${action.text}\n\n请描述这一行动的结果并推进剧情。inventory_added/inventory_removed 归属这个行动角色。`
+export function buildKpResolveUser(action: PlayerAction, roleName: string, remainingPcNames: string[] = []): string {
+  const turnNote = remainingPcNames.length
+    ? `本场景还有 ${remainingPcNames.join('、')} 尚未行动。请给他们留出接续空间，暂不要结束场景（scene_end 不要设为 true）。`
+    : '所有玩家在本场景都已有行动机会，可以按剧情自然决定是否收尾。'
+  return `【玩家行动（已通过 Validator 验证）】${roleName}（角色 ID：${action.roleId}）：${action.text}\n\n请描述这一行动的结果并推进剧情。inventory_added/inventory_removed 归属这个行动角色。${turnNote}`
 }
 
 /** Validator 的完整消息（无状态，每次重建） */

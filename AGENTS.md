@@ -32,7 +32,7 @@ GameEngine（纯编排，validator 为系统服务）
    │    pc-acting 事件驱动 UI「正在行动」chip 并禁用本地输入）
    │    → Validator（无状态，上下文每次重建）
    │    → verdictPass（valid && 全关键词 && 世界一致，逐字采用）→ 通过才转 KP
-   ├─ scene_end=true → finishScene 自动翻页 → 下一轮（没有手动结束入口）
+   ├─ scene_end=true → 等本场景每位 PC 至少行动一次 → finishScene 自动翻页 → 下一轮（没有手动结束入口）
    └─ requestReroll: 全体同意（LLM 角色恒同意）→ doReroll 回滚 world/log/控制器历史
         → **跳过本轮**（翻到 pendingNextPages 骰面指示页）→ 新页重掷重开
 ```

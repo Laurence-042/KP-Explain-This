@@ -51,6 +51,10 @@ export type EngineSnapshot = {
   log: GameLogEntry[]
   currentSceneNarrative: string
   sceneEndHint: boolean
+  /** 当前场景已通过验证并交给 KP 的玩家；旧存档可缺省 */
+  actedRoleIds?: RoleId[]
+  /** 下一位应行动的 PC 索引；旧存档可缺省 */
+  nextPcIndex?: number
 }
 
 type RoundCheckpoint = {
@@ -108,6 +112,9 @@ export class GameEngine {
   /** interrupted 状态下 UI 的决定通道 */
   private resume: (() => void) | null = null
   private sceneEnded = false
+  private sceneEndPending = false
+  private actedThisScene = new Set<RoleId>()
+  private nextPcIndex = 0
 
   constructor(validatorSession: LLMSession, emit: (event: EngineEvent) => void) {
     this.validatorSession = validatorSession
@@ -167,6 +174,9 @@ export class GameEngine {
     this.rolls = {}
     this.currentSceneNarrative = ''
     this.sceneEndHint = false
+    this.sceneEndPending = false
+    this.actedThisScene.clear()
+    this.nextPcIndex = 0
     this.rerollApproved = false
     this.world = createInitialWorld(
       controllers.filter((c) => c.role.kind === 'pc').map((c) => ({ id: c.role.id, name: c.role.name })),
@@ -226,7 +236,7 @@ export class GameEngine {
         this.doReroll()
         continue
       }
-      if (this.stopped) return
+      if (result === 'stopped' || this.stopped) return
       await this.finishScene()
     }
   }
@@ -234,22 +244,19 @@ export class GameEngine {
   /** 已有场景的行动循环：逐 PC 收集行动 → 验证 → KP 推进，直到自然收尾/重骰/停止 */
   private async playSceneActions(): Promise<SceneResult> {
     while (!this.sceneEnded && !this.stopped && !this.rerollApproved) {
-      let progressed = false
-      for (const pc of this.pcControllers) {
-        const validated = await this.collectValidatedAction(pc)
-        if (validated === null) break // 中断（重骰/停止）
-        const st = await this.stepWithRetry(() => this.kpAct('kp-respond', validated))
-        if (st === 'rerolled') return 'rerolled'
-        progressed = true
-        if (this.sceneEnded || this.stopped) break
-      }
-      if (this.stopped || this.rerollApproved) break
-      // 行动收集被中止但既非重骰也非停止：视为挂起，不能误当场景收尾
-      if (!progressed && !this.sceneEnded) return 'stopped'
+      const pcs = this.pcControllers
+      if (!pcs.length) return 'stopped'
+      const pc = pcs[this.nextPcIndex % pcs.length]
+      const validated = await this.collectValidatedAction(pc)
+      if (validated === null) break // 中断（重骰/停止）
+      this.actedThisScene.add(pc.role.id)
+      const st = await this.stepWithRetry(() => this.kpAct('kp-respond', validated))
+      if (st === 'rerolled') return 'rerolled'
+      this.nextPcIndex = (this.nextPcIndex + 1) % pcs.length
     }
     if (this.stopped) return 'stopped'
     if (this.rerollApproved) return 'rerolled'
-    return 'ended'
+    return this.sceneEnded ? 'ended' : 'stopped'
   }
 
   /** 掷出本轮骰子并建立重骰回滚点 */
@@ -257,6 +264,9 @@ export class GameEngine {
     this.world.round = this.round
     this.sceneEndHint = false
     this.sceneEnded = false
+    this.sceneEndPending = false
+    this.actedThisScene.clear()
+    this.nextPcIndex = 0
     this.checkpoint = {
       world: clone(this.world),
       logLength: this.log.length,
@@ -288,6 +298,9 @@ export class GameEngine {
       world: this.world,
       keywords: this.keywords[kp.role.id] ?? [],
       validatedAction,
+      remainingPcNames: this.pcControllers
+        .filter((pc) => !this.actedThisScene.has(pc.role.id))
+        .map((pc) => pc.role.name),
       lastNarrative: kind === 'kp-scene' ? this.currentSceneNarrative || undefined : undefined,
       onStream: (delta) => this.emit({ type: 'kp-stream', delta }),
     }
@@ -333,7 +346,11 @@ export class GameEngine {
     kp.onApplied(req, parsed.narrative)
 
     if (applyResult.sceneEnd) {
+      this.sceneEndPending = true
       this.sceneEndHint = true
+    }
+    // KP 可以建议收尾，但在多玩家场景中每位 PC 至少有一次行动机会。
+    if (this.sceneEndPending && this.pcControllers.every((pc) => this.actedThisScene.has(pc.role.id))) {
       this.sceneEnded = true
     }
     this.emit({ type: 'kp-narrative', narrative: parsed.narrative, opening: kind === 'kp-scene' })
@@ -472,6 +489,11 @@ export class GameEngine {
       if (!verdict) {
         this.addLog({ type: 'warning', round: this.round, text: 'Validator 调用失败，本次行动未被接受，请稍后重试。' })
         this.emit({ type: 'error', message: 'Validator 调用失败', stage: 'validator' })
+        if (isLlmPc) {
+          this.setPhase('interrupted')
+          this.emit({ type: 'mutated' })
+          await this.waitForRetry()
+        }
         continue
       }
       const pass = verdictPass(verdict)
@@ -567,6 +589,9 @@ export class GameEngine {
     }
     this.sceneEndHint = false
     this.sceneEnded = false
+    this.sceneEndPending = false
+    this.actedThisScene.clear()
+    this.nextPcIndex = 0
     this.rerollApproved = false
     this.resume = null
     for (const c of this.controllers) {
@@ -615,6 +640,8 @@ export class GameEngine {
       log: this.log,
       currentSceneNarrative: this.currentSceneNarrative,
       sceneEndHint: this.sceneEndHint,
+      actedRoleIds: [...this.actedThisScene],
+      nextPcIndex: this.nextPcIndex,
     }
   }
 
@@ -635,6 +662,9 @@ export class GameEngine {
     this.log = snap.log
     this.currentSceneNarrative = snap.currentSceneNarrative
     this.sceneEndHint = snap.sceneEndHint
+    this.sceneEndPending = snap.sceneEndHint
+    this.actedThisScene = new Set(snap.actedRoleIds ?? [])
+    this.nextPcIndex = snap.nextPcIndex ?? 0
     this.entrySeq = snap.log.length
     this.stopped = false
     this.busy = false

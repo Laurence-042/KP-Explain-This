@@ -312,6 +312,58 @@ describe('GameEngine：中断与重试', () => {
 })
 
 describe('GameEngine：多 PC 扩展（同基类架构验证）', () => {
+  it('KP 在本地玩家行动后提前收尾，LLM PC 仍能在翻页前行动', async () => {
+    const ctx = makeGame([KP_SCENE_REPLY, KP_RESOLVE_END_REPLY, KP_RESOLVE_REPLY, KP_NEXT_SCENE_REPLY])
+    const pcRole: RoleDef = { id: 'pc-llm-1', name: '玩家B', kind: 'pc', controller: 'llm', bookId: 'b1' }
+    const pcClient = new LLMClient('http://fake/v1', 'key')
+    let requests = 0
+    ;(pcClient as unknown as Record<string, unknown>).complete = async () => {
+      requests++
+      return '我观察房间，准备行动。'
+    }
+    const pcSession = new LLMSession(pcClient, { model: 'pc-model' })
+    const llmPc = new LlmPcController(pcRole, pcSession)
+
+    await start(ctx.engine, [ctx.kp, ctx.human, llmPc], ctx.books)
+    try {
+      await waitFor(() => ctx.human.awaitingAction)
+      ctx.human.submitText('我推开门。')
+      await waitFor(() => ctx.engine.round === 2)
+      expect(requests).toBeGreaterThan(0)
+      expect(ctx.engine.log.some((entry) => entry.type === 'action' && entry.roleId === 'pc-llm-1' && entry.round === 1)).toBe(true)
+      expect(ctx.events.some((event) => event.type === 'pc-acting' && event.roleId === 'pc-llm-1' && event.active)).toBe(true)
+    } finally {
+      ctx.engine.stop()
+    }
+  })
+
+  it('多玩家存档恢复后从下一位玩家继续', async () => {
+    const ctx = makeGame([KP_SCENE_REPLY, KP_RESOLVE_REPLY])
+    const pcB: RoleDef = { id: 'pc-b', name: '玩家B', kind: 'pc', controller: 'human', bookId: 'b1' }
+    const humanB = new HumanController(pcB)
+    await start(ctx.engine, [ctx.kp, ctx.human, humanB], ctx.books)
+    await waitFor(() => ctx.human.awaitingAction)
+    ctx.human.submitText('我查看门外。')
+    await waitFor(() => humanB.awaitingAction)
+    const snap = ctx.engine.snapshot()
+    const history = ctx.kpSession.serialize()
+    ctx.engine.stop()
+
+    const kpSession = new LLMSession(ctx.mocks.kpClient, { model: 'kp-model' })
+    kpSession.restore(history)
+    const nextA = new HumanController(ctx.pcRole)
+    const nextB = new HumanController(pcB)
+    const resumed = new GameEngine(ctx.validatorSession, () => {})
+    resumed.restore(snap, [new LlmKpController(ctx.kpRole, kpSession), nextA, nextB], ctx.books)
+    try {
+      void resumed.resumeLoop()
+      await waitFor(() => nextB.awaitingAction)
+      expect(nextA.awaitingAction).toBe(false)
+    } finally {
+      resumed.stop()
+    }
+  })
+
   it('两个真人 PC 依次行动，各自验证并推进', async () => {
     const bResolve = '仓库的门在身后合拢，这一夜结束了。\n\n```json\n{"inventory_added":["铜铃"],"player_changes":{"awake":true},"scene_end":true}\n```'
     const ctx = makeGame([KP_SCENE_REPLY, KP_RESOLVE_REPLY, bResolve, KP_NEXT_SCENE_REPLY])
@@ -532,6 +584,19 @@ describe('GameEngine：LLM PC（控制器三变种的 LLM-PC 形态）', () => {
       await waitFor(() => ctx.engine.phase === 'interrupted')
       expect(ctx.engine.log.filter((l) => l.type === 'action')).toHaveLength(3)
       expect(ctx.engine.log.some((l) => l.type === 'warning' && l.text.includes('连续 3 次'))).toBe(true)
+    } finally {
+      ctx.stop()
+    }
+  })
+
+  it('LLM PC 的 Validator 失败时暂停，不重复生成行动', async () => {
+    const ctx = makeLlmPcGame([KP_SCENE_REPLY])
+    ctx.mocks.validatorFail = true
+    try {
+      ctx.startIt()
+      await waitFor(() => ctx.engine.phase === 'interrupted')
+      expect(ctx.engine.log.filter((entry) => entry.type === 'action')).toHaveLength(1)
+      expect(ctx.events.some((event) => event.type === 'error' && event.stage === 'validator')).toBe(true)
     } finally {
       ctx.stop()
     }

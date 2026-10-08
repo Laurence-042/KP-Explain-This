@@ -36,6 +36,8 @@ export type ActionRequest = {
   keywords: string[]
   /** kp-respond：已验证行动 */
   validatedAction?: { roleId: string; roleName: string; text: string }
+  /** 本场景还未得到行动机会的 PC，供 KP 留出叙事空间 */
+  remainingPcNames?: string[]
   /** kp-scene：上一场景结尾（衔接用） */
   lastNarrative?: string
   /** pc-act：KP 最新的场景叙述（LLM PC 据此回应；人类控制器忽略） */
@@ -235,7 +237,11 @@ export class LlmKpController extends BaseLlmController {
       buildKpSystemPrompt(req.world, req.keywords, req.round)
     const userMessage =
       req.kind === 'kp-respond' && req.validatedAction
-        ? buildKpResolveUser({ roleId: req.validatedAction.roleId, text: req.validatedAction.text }, req.validatedAction.roleName)
+        ? buildKpResolveUser(
+            { roleId: req.validatedAction.roleId, text: req.validatedAction.text },
+            req.validatedAction.roleName,
+            req.remainingPcNames ?? [],
+          )
         : buildKpSceneOpening(req.round, req.lastNarrative)
     const text = await this.session.send(userMessage, {
       onChunk: req.onStream,
