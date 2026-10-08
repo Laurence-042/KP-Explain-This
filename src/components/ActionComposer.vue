@@ -71,6 +71,7 @@ function onKeydown(event: KeyboardEvent) {
       ref="textareaRef"
       v-model="draft"
       type="textarea"
+      :aria-label="t('actionLabel')"
       :autosize="{ minRows: 2, maxRows: 6 }"
       :placeholder="t('actionPlaceholder')"
       :disabled="running || interrupted || Boolean(pcActing)"
@@ -114,9 +115,11 @@ function onKeydown(event: KeyboardEvent) {
             {{ t('assistDraft') }}
           </el-button>
         </el-tooltip>
-        <el-button type="success" size="large" :icon="Promotion" :disabled="!canSubmit" @click="send">
-          {{ t('submitAction') }}
-        </el-button>
+        <el-tooltip :content="t('actionKeys')" placement="top" :show-after="300">
+          <el-button type="success" size="large" :icon="Promotion" :disabled="!canSubmit" @click="send">
+            {{ t('submitAction') }}
+          </el-button>
+        </el-tooltip>
       </template>
     </div>
   </div>

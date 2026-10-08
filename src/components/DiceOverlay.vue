@@ -2,12 +2,14 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { DiceOverlayEntry, DiceOverlayState } from '../composables/useGame'
+import BookPageText from './BookPageText.vue'
+import type { PageTextHit } from './bookPageText'
 
 /**
  * 掷骰演出：真渲染一本带封皮/书脊/内页的实体书，骰子从空中翻滚落下、
  * 停在命中的单词上（词位在渲染后用 getBoundingClientRect 实测，
  * 全程不依赖 rAF，动画均为 CSS keyframes）。
- * 多个角色按 ~3.6s 依次演出，点击任意处跳过/关闭。
+ * 只演出当前视角角色；开局依次演出封面初掷与翻开页掷骰。
  */
 
 const props = defineProps<{
@@ -24,7 +26,7 @@ const FACES = [1, 6, 3, 4, 5, 2]
 
 const activeIndex = ref(0)
 const bookRef = ref<HTMLElement | null>(null)
-const diceSpots = ref<Array<{ left: string; top: string; delay: string; value: number; digit: number }>>([])
+const diceSpots = ref<Array<{ left: string; top: string; delay: string; value: number }>>([])
 let timers: ReturnType<typeof setTimeout>[] = []
 
 const entry = computed<DiceOverlayEntry | undefined>(
@@ -57,11 +59,27 @@ function measureDice(e: DiceOverlayEntry): void {
   const book = bookRef.value
   if (!book) return
   const bookRect = book.getBoundingClientRect()
+  const page = book.querySelector<HTMLElement>('.stage-page')
   const marks = [...book.querySelectorAll<HTMLElement>('[data-land]')]
   const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max)
 
+  // 长页也保持在书框内；若命中词能同屏显示，先把它们一同滚入页框。
+  if (page && marks.length) {
+    const pageRect = page.getBoundingClientRect()
+    const positions = marks.map((mark) => {
+      const rect = mark.getBoundingClientRect()
+      return { top: rect.top - pageRect.top + page.scrollTop, bottom: rect.bottom - pageRect.top + page.scrollTop }
+    })
+    const first = positions[0].top
+    const min = Math.min(...positions.map((p) => p.top))
+    const max = Math.max(...positions.map((p) => p.bottom))
+    const target = max - min <= page.clientHeight
+      ? (min + max - page.clientHeight) / 2
+      : first - page.clientHeight / 3
+    page.scrollTop = clamp(target, 0, page.scrollHeight - page.clientHeight)
+  }
+
   diceSpots.value = e.dice.map((value, i) => {
-    const digit = value % 10
     const mark = marks.find((el) => el.dataset.land === String(i))
     if (mark) {
       const r = mark.getBoundingClientRect()
@@ -70,16 +88,23 @@ function measureDice(e: DiceOverlayEntry): void {
         top: clamp(r.top - bookRect.top - 42, -8, bookRect.height - 54) + 'px',
         delay: i * 0.16 + 's',
         value,
-        digit,
       }
     }
-    // 落词不在本页（跨页兜底）或合书初掷：沿底部/封皮散开
+    if (e.init && e.landings[i]) {
+      const landing = e.landings[i]
+      return {
+        left: Math.round(bookRect.width * (0.15 + landing.x * 0.7) - 24) + 'px',
+        top: Math.round(bookRect.height * (0.16 + landing.y * 0.65) - 24) + 'px',
+        delay: i * 0.16 + 's',
+        value,
+      }
+    }
+    // 落词跨页兜底：沿书页底部排列
     return {
       left: clamp(60 + i * 150, 20, bookRect.width - 60) + 'px',
-      top: e.init ? Math.round(bookRect.height * 0.42) + 'px' : bookRect.height - 86 + 'px',
+      top: bookRect.height - 86 + 'px',
       delay: i * 0.16 + 's',
       value,
-      digit,
     }
   })
 }
@@ -92,20 +117,15 @@ watch(
   },
 )
 
-/** 页文本按落词 offset 切片，命中词渲染为带 data-land 的高亮 span */
-const segments = computed<Array<{ text: string; land?: number }>>(() => {
+const pageHits = computed<PageTextHit[]>(() => {
   const e = entry.value
-  if (!e || !e.pageText) return []
-  const onPage = e.lands.filter((l) => l.onPage).sort((a, b) => a.offset - b.offset)
-  const parts: Array<{ text: string; land?: number }> = []
-  let cursor = 0
-  for (const land of onPage) {
-    if (land.offset > cursor) parts.push({ text: e.pageText.slice(cursor, land.offset) })
-    parts.push({ text: e.pageText.slice(land.offset, land.offset + land.length), land: land.dieIndex })
-    cursor = land.offset + land.length
-  }
-  if (cursor < e.pageText.length) parts.push({ text: e.pageText.slice(cursor) })
-  return parts
+  if (!e) return []
+  return e.lands.filter((land) => land.onPage).map((land) => ({
+    dieIndex: land.dieIndex,
+    dieValue: e.dice[land.dieIndex],
+    offset: land.offset,
+    length: land.length,
+  }))
 })
 
 function skip(): void {
@@ -135,26 +155,18 @@ onBeforeUnmount(clearTimers)
             :class="{ closed: entry.init }"
           >
             <!-- 内页：真实页文本 + 命中词高亮 -->
-            <div v-if="!entry.init" class="stage-page">
-              <template v-for="(seg, i) in segments" :key="i">
-                <span
-                  v-if="seg.land !== undefined"
-                  class="stage-hit"
-                  :data-land="seg.land"
-                  :style="{ animationDelay: 0.5 + seg.land * 0.16 + 's' }"
-                >{{ seg.text }}</span>
-                <template v-else>{{ seg.text }}</template>
-              </template>
+            <div class="stage-page">
+              <BookPageText :text="entry.pageText" :hits="pageHits" animated />
             </div>
             <!-- 合书初掷：封皮 -->
-            <div v-else class="stage-cover">
+            <div v-if="entry.init" class="stage-cover">
               <div class="stage-cover-frame">
                 <div class="stage-cover-title">{{ entry.bookName }}</div>
                 <div class="stage-cover-dice-note">1d10 × {{ entry.dice.length }}</div>
               </div>
             </div>
 
-            <!-- 骰子：落在词上，骰子下方标注它代表的数字位（10 = 0） -->
+            <!-- 骰子落在实测词位；数字推导收进书签的可展开说明 -->
             <div
               v-for="(d, i) in diceSpots"
               :key="activeIndex + '-' + i"
@@ -169,7 +181,6 @@ onBeforeUnmount(clearTimers)
                   :data-face="fi"
                 >{{ fi === 0 ? d.value : f }}</span>
               </div>
-              <span class="die-digit" :style="{ animationDelay: `calc(${d.delay} + 0.85s)` }">= {{ d.digit }}</span>
             </div>
 
             <div class="stage-spine" />
@@ -188,20 +199,12 @@ onBeforeUnmount(clearTimers)
                 :style="{ animationDelay: 1.05 + i * 0.15 + 's' }"
               >{{ kw }}</el-tag>
             </div>
-            <!-- 骰面 → 数字位 → 组合数 → 取模 → 页码：完整推导让玩家看懂规则 -->
-            <div class="stage-math" :style="{ animationDelay: '1.35s' }">
-              <span class="math-step">{{ entry.dice.map((d) => d % 10).join(' · ') }} = {{ entry.diceNumber }}</span>
-              <span class="math-arrow">→</span>
-              <span class="math-step">{{ t('diceOverlay.modFormula', { num: entry.diceNumber, total: entry.totalPages, mod: entry.modPage + 1 }) }}</span>
-              <span class="math-arrow">→</span>
-              <span class="math-page">{{ t('diceOverlay.flipTo', { n: entry.nextPage + 1, total: entry.totalPages }) }}</span>
-            </div>
-            <div
-              v-if="entry.modPage !== entry.nextPage"
-              class="stage-mapped"
-              :style="{ animationDelay: '1.55s' }"
-            >
-              {{ t('diceOverlay.mappedNote', { from: entry.modPage + 1, to: entry.nextPage + 1 }) }}
+            <div class="stage-bookmark-note" :style="{ animationDelay: '1.35s' }">
+              <span class="stage-bookmark-icon" aria-hidden="true">▮</span>
+              <span>
+                <small>{{ entry.init ? t('bookmark.initialPage') : t('bookmark.rollNote') }}</small>
+                <strong>{{ entry.init ? t('diceOverlay.flipTo', { n: entry.nextPage + 1, total: entry.totalPages }) : t('bookmark.page', { n: entry.nextPage + 1 }) }}</strong>
+              </span>
             </div>
             <div class="dice-overlay-hint">{{ t('diceOverlay.hint') }}</div>
           </div>

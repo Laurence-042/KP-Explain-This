@@ -58,6 +58,29 @@ describe('sanitizeStateChanges', () => {
     expect(sanitizeStateChanges({ scene_end: 'yes' }).changes.scene_end).toBeUndefined()
     expect(sanitizeStateChanges({ scene_end: 'yes' }).warnings.length).toBeGreaterThan(0)
   })
+
+  it('当前行动者的状态简写归入实际玩家 ID，嵌套 state 展平', () => {
+    const world = createInitialWorld([P1, { id: 'pc-b', name: '玩家B' }])
+    const { changes, warnings } = sanitizeStateChanges(
+      { player_changes: { awake: true, state: { status: '清醒' } } },
+      { players: world.players, actingRoleId: 'pc-b' },
+    )
+    expect(changes.player_changes).toEqual({ 'pc-b': { awake: true, status: '清醒' } })
+    expect(warnings).toEqual([])
+    applyStateChanges(world, changes, 'pc-b')
+    expect(world.players['pc-b']).toMatchObject({ awake: true, status: '清醒' })
+    expect(world.players['pc-a'].status).toBe('')
+  })
+
+  it('未知玩家键仍保留警告，不误认成行动者状态', () => {
+    const world = freshWorld()
+    const { changes } = sanitizeStateChanges(
+      { player_changes: { 陌生人: { status: 'x' } } },
+      { players: world.players, actingRoleId: 'pc-a' },
+    )
+    const result = applyStateChanges(world, changes, 'pc-a')
+    expect(result.warnings.some((x) => x.includes('陌生人'))).toBe(true)
+  })
 })
 
 describe('applyStateChanges', () => {
@@ -85,6 +108,24 @@ describe('applyStateChanges', () => {
     const r = applyStateChanges(w, { inventory_removed: ['ROPE', 'torch'] }, 'pc-a')
     expect(w.inventory['pc-a']).toEqual(['Knife'])
     expect(r.warnings.some((x) => x.includes('torch'))).toBe(true)
+  })
+
+  it('开场可按角色 ID 分配物品，多玩家时不猜测顶层物品归属', () => {
+    const w = createInitialWorld([P1, { id: 'pc-b', name: '玩家B' }])
+    const { changes, warnings } = sanitizeStateChanges({
+      inventory_changes: {
+        'pc-a': { added: ['钥匙', 42] },
+        'pc-b': { added: ['地图'] },
+      },
+    })
+    expect(warnings.some((item) => item.includes('pc-a.added'))).toBe(true)
+    const applied = applyStateChanges(w, changes, '')
+    expect(applied.warnings).toEqual([])
+    expect(w.inventory).toMatchObject({ 'pc-a': ['钥匙'], 'pc-b': ['地图'] })
+
+    const ambiguous = applyStateChanges(w, { inventory_added: ['不明物品'] }, '')
+    expect(ambiguous.warnings[0]).toContain('inventory_changes')
+    expect(w.inventory['pc-a']).toEqual(['钥匙'])
   })
 
   it('npc_changes 合并且保留既有字段', () => {

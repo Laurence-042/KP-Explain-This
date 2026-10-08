@@ -52,11 +52,11 @@ body {
   margin-top: 4px;
 }
 
-.advanced-collapse :deep(.el-collapse-item__header) {
+.advanced-collapse .el-collapse-item__header {
   font-weight: 600;
 }
 
-.advanced-collapse :deep(.el-collapse-item__content) {
+.advanced-collapse .el-collapse-item__content {
   padding-bottom: 8px;
 }
 
@@ -286,7 +286,7 @@ body {
 }
 
 .app-title {
-  font-size: 18px;
+  font-size: 21px;
   font-weight: 700;
   color: #1e3a5f;
 }
@@ -333,30 +333,7 @@ body {
 
 /* ===== 书页 ===== */
 
-.book-tabs :deep(.el-tabs__header) {
-  margin-bottom: 8px;
-}
-
-/* 侧栏书页：实体书外观（皮面边框 + 书脊 + 书口页叠） */
-.book-view {
-  position: relative;
-  border-radius: 3px 12px 12px 3px;
-  background: linear-gradient(to bottom, #5d3a1c, #43290f);
-  padding: 7px 11px 7px 10px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
-}
-
-.book-view::after {
-  content: '';
-  position: absolute;
-  right: -7px;
-  top: 8px;
-  bottom: 8px;
-  width: 7px;
-  background: repeating-linear-gradient(to bottom, #f7f0dc 0 2px, #cbb98c 2px 3px);
-  border-radius: 0 3px 3px 0;
-  pointer-events: none;
-}
+.book-view { position: relative; }
 
 .book-head {
   display: flex;
@@ -365,14 +342,6 @@ body {
   padding: 8px 12px 6px 20px;
   background: transparent;
   font-size: 13px;
-}
-
-.book-name {
-  font-weight: 600;
-  color: #713f12;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .book-owner {
@@ -390,78 +359,15 @@ body {
 
 .book-page-body {
   position: relative;
-  height: 420px;
-  overflow: auto;
-  padding: 14px 16px 14px 22px;
-  font-size: 14px;
-  line-height: 1.9;
-  text-align: justify;
-  color: #44403c;
-  background: #fffdf5;
-  border-radius: 2px 8px 8px 2px;
-  box-shadow: inset 3px 0 10px rgba(74, 44, 20, 0.22);
-  transition: filter 0.3s ease, opacity 0.3s ease;
-}
-
-.book-page-body.flipping {
-  animation: page-flip-body 0.9s ease;
-}
-
-@keyframes page-flip-body {
-  0% { opacity: 1; }
-  35% { opacity: 0.15; }
-  65% { opacity: 0.15; }
-  100% { opacity: 1; }
 }
 
 /* 翻页"纸"覆盖层：从右向左翻过 */
 .page-flip-sheet {
   position: absolute;
   inset: 0;
-  perspective: 1200px;
-  pointer-events: none;
-  overflow: hidden;
-}
-
-.page-flip-inner {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(to left, #fffdf5 85%, #eee5c8 100%);
-  box-shadow: -6px 0 18px rgba(0, 0, 0, 0.18);
-  transform-origin: left center;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #a16207;
-  font-size: 22px;
-  letter-spacing: 0.4em;
-  animation: sheet-turn 0.85s cubic-bezier(0.55, 0.06, 0.35, 1) forwards;
-}
-
-@keyframes sheet-turn {
-  0% { transform: rotateY(0deg); opacity: 1; }
-  100% { transform: rotateY(-105deg); opacity: 0.6; }
-}
-
-.book-page-body.blurred {
-  filter: blur(6px);
-  user-select: none;
-}
-
-.book-blur-hint {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #a16207;
-  font-size: 15px;
-  background: rgba(250, 246, 233, 0.4);
   pointer-events: none;
 }
+
 
 .book-empty {
   color: #a8a29e;
@@ -469,7 +375,8 @@ body {
   padding: 40px 0;
 }
 
-.book-hit {
+.page-hit {
+  position: relative;
   background: #fef08a;
   color: #713f12;
   border-radius: 4px;
@@ -477,6 +384,8 @@ body {
   font-weight: 600;
   box-shadow: 0 0 0 1px rgba(161, 98, 7, 0.35);
 }
+.page-hit:focus-visible { outline: 2px solid #72531e; outline-offset: 2px; }
+.page-text-content { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* ===== 关键词条 ===== */
 
@@ -514,7 +423,19 @@ body {
 
 .kw-role-name {
   font-weight: 600;
-  font-size: 13px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.kw-mine-label {
+  margin-left: auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #2f6758;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .kw-role-tag {
@@ -525,17 +446,6 @@ body {
   padding: 1px 6px;
 }
 
-.kw-toggle {
-  margin-left: auto;
-}
-
-.kw-body {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
 .kw-tags {
   display: flex;
   gap: 6px;
@@ -543,49 +453,8 @@ body {
 }
 
 .kw-tag {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
-}
-
-.kw-mask {
-  background: repeating-linear-gradient(45deg, #f1f5f9, #f1f5f9 4px, #e2e8f0 4px, #e2e8f0 8px);
-  color: transparent;
-}
-
-/* ===== 骰子 ===== */
-
-.dice-row {
-  display: inline-flex;
-  gap: 4px;
-}
-
-.die {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  background: #fff;
-  border: 1px solid #cbd5e1;
-  color: #1e3a5f;
-  font-weight: 700;
-  font-size: 14px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
-}
-
-/* 骰面推导：位数（10=0）→ 场景结束翻到的页 */
-.dice-derive {
-  align-self: center;
-  margin-left: 6px;
-  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
-  font-size: 12px;
-  color: #64748b;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  padding: 2px 8px;
-  white-space: nowrap;
 }
 
 /* ===== 掷骰 overlay：实体书舞台 ===== */
@@ -630,8 +499,7 @@ body {
 .stage-book {
   position: relative;
   width: min(680px, 92vw);
-  min-height: 400px;
-  max-height: 62vh;
+  height: clamp(300px, 55vh, 430px);
   background: #fffdf3;
   border-radius: 3px 12px 12px 3px;
   box-shadow:
@@ -666,18 +534,20 @@ body {
 }
 
 .stage-page {
+  position: absolute;
+  inset: 0;
   padding: 30px 34px 26px 52px;
-  font-size: 13px;
-  line-height: 2.1;
-  text-align: justify;
+  font-size: 15px;
+  line-height: 1.85;
+  text-align: left;
   color: #43382b;
-  overflow: hidden;
-  word-break: break-word;
+  overflow: auto;
+  background: #fffaf0;
+  border-radius: 3px 12px 12px 3px;
 }
 
 /* 命中词：骰子落下瞬间点亮 */
-.stage-hit {
-  position: relative;
+.page-hit-animated {
   font-weight: 700;
   color: #43382b;
   animation: land-hit 0.5s ease both;
@@ -689,13 +559,7 @@ body {
   100% { background: #fde68a; box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.5); }
 }
 
-/* 合书初掷：封皮 */
-.stage-book.closed .stage-cover {
-  min-height: 400px;
-}
-
 .stage-cover {
-  min-height: inherit;
   height: 100%;
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.06), transparent 40%),
@@ -758,29 +622,6 @@ body {
   animation: die-land 0.8s cubic-bezier(0.28, 0.7, 0.35, 1.18) both;
 }
 
-/* 骰子下方标注其数字位（面 10 = 0），落定后弹出 */
-.die-digit {
-  position: absolute;
-  top: 47px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
-  padding: 3px 8px;
-  border-radius: 9px;
-  color: #fef3c7;
-  background: rgba(30, 41, 59, 0.88);
-  border: 1px solid rgba(148, 163, 184, 0.4);
-  white-space: nowrap;
-  animation: digit-pop 0.3s ease both;
-}
-
-@keyframes digit-pop {
-  from { opacity: 0; transform: translateX(-50%) scale(0.5); }
-  to { opacity: 1; transform: translateX(-50%) scale(1); }
-}
-
 @keyframes die-land {
   0% { transform: translateY(-52vh) translateX(14px) rotateX(400deg) rotateY(280deg) scale(0.55); opacity: 0; }
   45% { opacity: 1; }
@@ -836,48 +677,21 @@ body {
   to { opacity: 1; transform: scale(1); }
 }
 
-/* 骰面 → 组合数 → 取模 → 页码 的推导算式 */
-.stage-math {
+.stage-bookmark-note {
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: center;
-  animation: kw-pop 0.4s ease both;
+  gap: 12px;
+  padding: 8px 18px 8px 10px;
+  border-radius: 4px 8px 8px 4px;
+  background: #eacb86;
+  color: #513c21;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, .25);
+  animation: kw-pop .4s ease both;
 }
-
-.math-step {
-  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
-  font-size: 15px;
-  color: #e2e8f0;
-  background: rgba(30, 41, 59, 0.6);
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  border-radius: 8px;
-  padding: 4px 10px;
-  letter-spacing: 0.06em;
-}
-
-.math-arrow {
-  color: #fbbf24;
-  font-weight: 800;
-  font-size: 15px;
-}
-
-.math-page {
-  font-size: 15px;
-  font-weight: 800;
-  color: #fef3c7;
-  background: linear-gradient(135deg, rgba(180, 83, 9, 0.55), rgba(120, 53, 15, 0.55));
-  border: 1px solid rgba(251, 191, 36, 0.5);
-  border-radius: 8px;
-  padding: 4px 12px;
-}
-
-.stage-mapped {
-  font-size: 12px;
-  color: #fca5a5;
-  animation: kw-pop 0.4s ease both;
-}
+.stage-bookmark-icon { color: #956326; font-size: 30px; line-height: 1; }
+.stage-bookmark-note span:last-child { display: flex; flex-direction: column; gap: 2px; }
+.stage-bookmark-note small { font-size: 12px; }
+.stage-bookmark-note strong { font-size: 17px; }
 
 .dice-overlay-hint {
   font-size: 12px;
@@ -976,11 +790,6 @@ body {
   padding: 3px 12px;
 }
 
-.kw-llm-tag {
-  background: #ede9fe !important;
-  color: #6d28d9 !important;
-}
-
 .composer-buttons {
   display: flex;
   gap: 8px;
@@ -1016,6 +825,376 @@ body {
   .composer-buttons {
     justify-content: flex-end;
   }
+}
+
+/* ===== 共享桌面：每位角色的书同时在场，故事写在中央记事本 ===== */
+body {
+  background: #1f312d;
+}
+
+.page.page-game {
+  padding: 20px;
+  background:
+    radial-gradient(ellipse at 50% 8%, rgba(186, 131, 69, 0.18), transparent 58%),
+    repeating-linear-gradient(94deg, transparent 0 65px, rgba(5, 15, 11, 0.035) 66px 68px),
+    linear-gradient(135deg, #274239, #172c28 58%, #102521);
+  min-height: 100vh;
+}
+
+.game-card {
+  width: min(1500px, 100%);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  --el-card-border-radius: 0;
+}
+
+.game-card > .el-card__header {
+  background: #f5efe2;
+  border: 1px solid #c9bba0;
+  border-radius: 12px;
+  margin-bottom: 18px;
+  box-shadow: 0 8px 22px rgba(5, 15, 11, 0.25);
+}
+
+.game-card > .el-card__body { padding: 0; }
+.game-layout { display: block; }
+.tabletop-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  color: #efe6cf;
+  margin: 0 4px 13px;
+  font-family: 'STSong', 'Songti SC', 'SimSun', serif;
+  font-size: 22px;
+  letter-spacing: 0.08em;
+}
+.tabletop-kicker {
+  display: block;
+  font: 600 11px/1.5 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  letter-spacing: 0.2em;
+  color: #b49561;
+}
+.tabletop-heading .tabletop-kicker { color: #c8af83; }
+.tabletop-library {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 28px;
+  max-width: 1120px;
+  margin: 0 auto 30px;
+  align-items: start;
+}
+.focused-book { min-width: 0; --spread-height: clamp(300px, 34vw, 420px); }
+.focused-book .book-station { max-width: 860px; margin: 0 auto; }
+.focused-book .book-view { min-height: 0; }
+.book-switcher {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 10px 0;
+}
+.book-switcher .tabletop-kicker { color: #e7d1a6; margin-bottom: 3px; }
+.book-switch {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  min-height: 90px;
+  padding: 12px 14px;
+  border: 1px solid #ad9d76;
+  border-left: 8px solid #d4c5a2;
+  border-radius: 3px 9px 9px 3px;
+  background: #efe6d0;
+  color: #493e2c;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 3px 4px 0 #9f8d69, 0 10px 14px rgba(0,0,0,.18);
+  transition: transform .18s ease, background .18s ease;
+}
+.book-switch:hover, .book-switch:focus-visible { transform: translateX(-4px); background: #fff3da; }
+.book-switch:focus-visible { outline: 3px solid #e2bd68; outline-offset: 3px; }
+.book-switch.selected { border-left-color: #38685c; background: #fff9eb; }
+.switch-owner { display: flex; align-items: center; gap: 7px; font-weight: 700; font-size: 14px; }
+.switch-mine { border-radius: 4px; background: #d6e7dc; color: #2b594b; padding: 1px 5px; font-size: 11px; }
+.switch-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.switch-page { font-size: 12px; color: #635a49; }
+.book-station {
+  min-width: 0;
+  perspective: 1200px;
+  padding: 6px 4px 12px;
+}
+.book-station .book-view {
+  height: 100%;
+  min-height: 290px;
+  padding: 8px 12px 9px;
+  background: linear-gradient(115deg, #2d4d49, #183b38 9%, #254c48 95%, #142e2d);
+  border: 1px solid #102725;
+  border-radius: 7px 16px 16px 7px;
+  box-shadow: 2px 9px 0 #d3bf94, 3px 12px 0 #8c7250, 0 28px 30px rgba(0, 0, 0, 0.37);
+  transform: rotateX(3deg);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+.book-station .book-view:hover {
+  transform: rotateX(0deg) rotateZ(0deg) translateY(-4px);
+  box-shadow: 2px 9px 0 #d3bf94, 3px 12px 0 #8c7250, 0 32px 35px rgba(0, 0, 0, 0.43);
+}
+.book-station .book-head {
+  min-height: 29px;
+  padding: 2px 9px 7px;
+  justify-content: space-between;
+}
+.book-station .book-owner { color: #f0e4c5; font-size: 14px; font-weight: 700; }
+.book-station .book-page { color: #d4e5da; font-size: 13px; }
+.book-spread {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  height: var(--spread-height, 380px);
+  perspective: 1000px;
+  transform-style: preserve-3d;
+  background: #eadfc4;
+  border-radius: 2px 7px 7px 2px;
+  box-shadow: inset 0 0 0 1px #cab994;
+}
+.book-spread::after {
+  content: '';
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  left: calc(50% - 9px);
+  width: 18px;
+  background: linear-gradient(90deg, transparent, rgba(57, 42, 24, 0.2) 43%, rgba(255,255,255,.55) 54%, transparent);
+  pointer-events: none;
+}
+.book-facing-page,
+.book-station .book-page-body {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+  padding: 22px 25px;
+  color: #463c30;
+  font: 15px/1.85 'STSong', 'Songti SC', 'SimSun', serif;
+  text-align: left;
+  background: #fffaf0;
+  border-radius: 2px 0 0 2px;
+}
+.book-station .book-page-body {
+  border-radius: 0 6px 6px 0;
+}
+.book-station .book-text { color: inherit; }
+.book-station .page-hit { background: #d6b46d; color: #322813; }
+.book-station .book-foot {
+  position: relative;
+  min-height: 46px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  padding: 13px 185px 8px 10px;
+  color: #e8dbb7;
+  font: 12px 'STSong', 'Songti SC', serif;
+  letter-spacing: .08em;
+}
+.book-bookmark {
+  position: absolute;
+  z-index: 12;
+  right: 14px;
+  bottom: 3px;
+  color: #4b361c;
+}
+.book-bookmark .bookmark-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 156px;
+  padding: 5px 12px 6px;
+  border: 1px solid #bf9454;
+  border-radius: 3px 3px 8px 8px;
+  background: #f3d68f;
+  box-shadow: 0 3px 0 #a47139, 0 6px 12px rgba(0,0,0,.24);
+  text-align: center;
+}
+.book-bookmark:focus-visible { outline: 3px solid #fff5c6; outline-offset: 3px; }
+.book-bookmark .bookmark-tab span { font-size: 11px; }
+.book-bookmark .bookmark-tab strong { font-size: 15px; }
+.bookmark-explain {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  width: min(300px, 80vw);
+  padding: 13px 15px;
+  border: 1px solid #b99b65;
+  border-radius: 8px;
+  background: #fff9e9;
+  color: #463a2a;
+  box-shadow: 0 12px 24px rgba(0,0,0,.28);
+  font: 13px/1.65 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(5px);
+  transition: opacity .16s ease, transform .16s ease, visibility .16s ease;
+}
+.book-bookmark:hover .bookmark-explain,
+.book-bookmark:focus-within .bookmark-explain {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+.bookmark-explain strong { display: block; margin-bottom: 5px; font-size: 13px; }
+.book-station .page-flip-sheet {
+  z-index: 4;
+  left: 50%;
+  right: 0;
+  overflow: visible;
+  transform-style: preserve-3d;
+  transform-origin: left center;
+  animation: tabletop-page-turn .95s cubic-bezier(.24,.7,.3,1) both;
+}
+.page-flip-front, .page-flip-back {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(90deg, #eee2c8, #fffaf0 20%, #f4e9d1);
+  backface-visibility: hidden;
+  box-shadow: 0 4px 16px rgba(40, 25, 9, .22);
+}
+.page-flip-front { color: #9b865d; font-size: 20px; }
+.page-flip-back { transform: rotateY(180deg); background: linear-gradient(90deg, #faf3e3, #e6d5b8); }
+@keyframes tabletop-page-turn {
+  0% { transform: rotateY(0); }
+  48% { transform: rotateY(-88deg); }
+  100% { transform: rotateY(-180deg); }
+}
+
+.tabletop-notebook {
+  position: relative;
+  max-width: 1080px;
+  margin: 0 auto 30px;
+  padding: 14px 16px 14px 43px;
+  background: #e8ddc5;
+  border-radius: 8px 16px 16px 8px;
+  box-shadow: 8px 9px 0 #b7a88a, 10px 14px 0 #6a5c45, 0 28px 45px rgba(0,0,0,.38);
+  transform: rotateZ(-.3deg);
+}
+.notebook-binding {
+  position: absolute;
+  left: 16px;
+  top: 0;
+  bottom: 0;
+  width: 17px;
+  background: repeating-linear-gradient(to bottom, transparent 0 15px, #604b35 15px 19px, #cfbaa0 19px 23px, transparent 23px 34px);
+  border-left: 2px solid #9d886d;
+  border-right: 1px solid #b6a489;
+}
+.notebook-content {
+  min-height: 430px;
+  padding: 22px clamp(18px, 3vw, 44px) 24px;
+  background: linear-gradient(90deg, #f1e9d9 0, #fffdf5 3%, #fffdf5 97%, #f2eadb 100%);
+  border-left: 2px solid #d1ad9a;
+  border-radius: 3px 10px 10px 3px;
+}
+.notebook-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 15px;
+}
+.notebook-heading h2 {
+  font: 27px/1.2 'STSong', 'Songti SC', 'SimSun', serif;
+  color: #3e463b;
+  margin: 0;
+}
+.notebook-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #c8baa0;
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: #46584b;
+  background: #fffaf0;
+  font-size: 12px;
+  cursor: help;
+  white-space: nowrap;
+}
+.notebook-help:hover, .notebook-help:focus-visible { background: #e5efe5; border-color: #89a48f; }
+.notebook-help:focus-visible { outline: 2px solid #3d6c55; outline-offset: 2px; }
+.notebook-content .chat-panel {
+  min-height: 230px;
+  max-height: 50vh;
+  padding: 10px 6px;
+  border: 0;
+  background: transparent;
+}
+.notebook-content .message-content { max-width: min(90%, 740px); }
+.notebook-content .bubble { font-size: 15px; line-height: 1.8; }
+.notebook-content .kw-group.kw-mine { border: 2px solid #5b8c73; background: #e9f3e9; }
+.notebook-content .kw-group.kw-mine .kw-role-name { color: #244d3b; }
+.notebook-content .message.assistant .bubble { background: rgba(229, 221, 199, .7); color: #343a31; }
+.notebook-content .message.user .bubble { background: #426157; }
+.notebook-content .kw-group { background: rgba(255, 253, 245, .86); border-color: #d7c9ae; }
+.notebook-content .kw-group.kw-pc { background: rgba(224, 236, 227, .86); border-color: #b3c8b4; }
+.notebook-content .kw-group.kw-kp { background: rgba(246, 238, 214, .86); }
+.notebook-content .action-composer { padding-top: 13px; border-top: 1px solid rgba(114, 99, 70, .28); }
+.notebook-content .action-composer .el-textarea__inner { background: #fffdf5; border-color: #c8baa0; }
+
+/* 掷骰仍落在实测词位；桌面与书页阴影强化其实体感 */
+.dice-overlay {
+  background: radial-gradient(ellipse at 50% 20%, rgba(109, 74, 35, .3), transparent 55%),
+    repeating-linear-gradient(94deg, transparent 0 65px, rgba(0,0,0,.035) 66px 68px),
+    linear-gradient(135deg, rgba(31, 62, 53, .98), rgba(10, 30, 26, .99));
+}
+.stage-book { box-shadow: 5px 14px 0 #c4af89, 9px 19px 0 #745e43, 0 40px 65px rgba(0,0,0,.55); }
+.stage-book:not(.closed) { animation: stage-open .85s cubic-bezier(.2,.7,.25,1) both; }
+@keyframes stage-open { from { opacity: .35; filter: blur(3px); } to { opacity: 1; filter: blur(0); } }
+.stage-book.closed .stage-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  transform-origin: left center;
+  backface-visibility: hidden;
+  box-shadow: 12px 15px 26px rgba(0,0,0,.38);
+  animation: stage-cover-turn 1.05s 1.42s cubic-bezier(.2,.58,.25,1) both;
+}
+.stage-book.closed .stage-die { animation: init-dice-clear .24s 1.43s forwards; }
+@keyframes stage-cover-turn {
+  from { transform: rotateY(0); }
+  to { transform: rotateY(-165deg); }
+}
+@keyframes init-dice-clear { to { opacity: 0; } }
+
+@media (max-width: 950px) {
+  .tabletop-library { grid-template-columns: 1fr; gap: 8px; }
+  .book-switcher { flex-direction: row; overflow-x: auto; padding: 4px 3px 13px; }
+  .book-switcher .tabletop-kicker { display: none; }
+  .book-switch { min-width: 165px; width: 165px; }
+}
+@media (max-width: 650px) {
+  .page.page-game { padding: 10px; }
+  .book-station .book-view { transform: none; }
+  .focused-book { --spread-height: 270px; }
+  .book-facing-page,
+  .book-station .book-page-body { font-size: 14px; line-height: 1.75; padding: 14px; }
+  .stage-page { font-size: 14px; line-height: 1.75; padding: 22px 18px 20px 42px; }
+  .tabletop-notebook { padding: 8px 8px 8px 28px; transform: none; }
+  .notebook-binding { left: 9px; width: 12px; }
+  .notebook-content { padding: 16px 12px 20px; }
+  .notebook-heading h2 { font-size: 22px; }
+  .notebook-content .message-content { max-width: 100%; }
+  .notebook-content .bubble { font-size: 14px; }
+  .header { flex-wrap: wrap; gap: 12px; }
+  .header-right { flex-wrap: wrap; }
+  .app-subtitle { display: none; }
+  .book-station .book-foot { padding-right: 168px; }
+  .book-bookmark { right: 7px; }
+  .book-bookmark .bookmark-tab { min-width: 146px; }
 }
 
 /* ===== 开局面板 ===== */
@@ -1165,4 +1344,3 @@ body {
 .ws-raw {
   margin-top: 18px;
 }
-

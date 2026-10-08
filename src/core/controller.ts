@@ -35,7 +35,7 @@ export type ActionRequest = {
   /** 该角色的本轮关键词 */
   keywords: string[]
   /** kp-respond：已验证行动 */
-  validatedAction?: { roleName: string; text: string }
+  validatedAction?: { roleId: string; roleName: string; text: string }
   /** kp-scene：上一场景结尾（衔接用） */
   lastNarrative?: string
   /** pc-act：KP 最新的场景叙述（LLM PC 据此回应；人类控制器忽略） */
@@ -235,14 +235,14 @@ export class LlmKpController extends BaseLlmController {
       buildKpSystemPrompt(req.world, req.keywords, req.round)
     const userMessage =
       req.kind === 'kp-respond' && req.validatedAction
-        ? buildKpResolveUser({ roleId: this.role.id, text: req.validatedAction.text }, req.validatedAction.roleName)
+        ? buildKpResolveUser({ roleId: req.validatedAction.roleId, text: req.validatedAction.text }, req.validatedAction.roleName)
         : buildKpSceneOpening(req.round, req.lastNarrative)
     const text = await this.session.send(userMessage, {
       onChunk: req.onStream,
       signal,
       stage: req.kind === 'kp-respond' ? 'kp-resolve' : 'kp-scene',
     })
-    const formatted = await this.repairMissingChanges(text, signal)
+    const formatted = await this.repairMissingChanges(text, req, signal)
     this.lastFormatted = formatted === text ? null : formatted
     return { text: formatted }
   }
@@ -259,7 +259,7 @@ export class LlmKpController extends BaseLlmController {
    * 检测到缺失时补一次一次性提取请求（不入会话历史、失败则原样返回交由引擎告警），
    * 把结果重组成协议格式。
    */
-  private async repairMissingChanges(raw: string, signal: AbortSignal): Promise<string> {
+  private async repairMissingChanges(raw: string, req: ActionRequest, signal: AbortSignal): Promise<string> {
     const first = parseKpOutput(raw)
     if (first.stateChangesRaw !== null || signal.aborted) return raw
     let repaired: string
@@ -267,7 +267,7 @@ export class LlmKpController extends BaseLlmController {
       repaired = await this.session.client.complete(
         {
           model: this.session.params.model,
-          messages: buildKpRepairMessages(first.narrative),
+          messages: buildKpRepairMessages(first.narrative, req.world, req.validatedAction?.roleId),
           temperature: 0,
         },
         'kp-repair',

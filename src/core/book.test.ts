@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   bookStats,
   diceReachableMaxPage,
-  dieToWordIndex,
   globalWordCount,
   isPageValid,
   locateWord,
@@ -117,20 +116,11 @@ describe('nearestValidPage', () => {
   })
 })
 
-describe('dieToWordIndex', () => {
-  it('骰面映射到页内档位（面 10 = 第 0 档）并叠加骰子序号', () => {
-    expect(dieToWordIndex(300, 1, 0)).toBe(30)
-    expect(dieToWordIndex(300, 10, 2)).toBe(2)
-    expect(dieToWordIndex(300, 7, 1)).toBe(211)
-    expect(dieToWordIndex(5, 10, 2)).toBe(2)
-  })
-})
-
 describe('pickKeywordOnPage', () => {
   const doc = parseTxt('b1', 'test', 'knife ab winter the debt', 100)
 
   it('从落点向后取最近的有效词，pick 携带页内偏移', () => {
-    const pick = pickKeywordOnPage(doc, 0, 1, 0, new Set())
+    const pick = pickKeywordOnPage(doc, 0, 1, 0, new Set(), 0)
     expect(pick.keyword).toBe('knife')
     expect(pick.pageIndex).toBe(0)
     expect(pick.offset).toBe(0)
@@ -140,7 +130,7 @@ describe('pickKeywordOnPage', () => {
   it('三个骰子得到三个互不相同的关键词', () => {
     const used = new Set<string>()
     const picks = [1, 6, 2].map((dv, i) => {
-      const pick = pickKeywordOnPage(doc, 0, dv, i, used)
+      const pick = pickKeywordOnPage(doc, 0, dv, i, used, [0, 4, 2][i])
       used.add(pick.keyword.toLowerCase())
       return pick
     })
@@ -150,11 +140,11 @@ describe('pickKeywordOnPage', () => {
   it('当前页有效词耗尽时越页取词（pageIndex 指向命中页）', () => {
     const twoPages = parseTxt('b', 't', 'knife ab winter the debt glass river stone iron wind', 5)
     const used = new Set<string>()
-    const p1 = pickKeywordOnPage(twoPages, 0, 1, 0, used)
+    const p1 = pickKeywordOnPage(twoPages, 0, 1, 0, used, 0)
     used.add(p1.keyword.toLowerCase())
-    const p2 = pickKeywordOnPage(twoPages, 0, 5, 1, used)
+    const p2 = pickKeywordOnPage(twoPages, 0, 5, 1, used, 4)
     used.add(p2.keyword.toLowerCase())
-    const p3 = pickKeywordOnPage(twoPages, 0, 4, 2, used)
+    const p3 = pickKeywordOnPage(twoPages, 0, 4, 2, used, 4)
     expect(p1.keyword).toBe('knife')
     expect(p1.pageIndex).toBe(0)
     expect(p2.keyword).toBe('debt')

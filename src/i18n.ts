@@ -3,8 +3,17 @@ import { createI18n } from 'vue-i18n'
 // MVP 阶段仅提供中文文案；保留 vue-i18n 结构便于后续补充其他语言。
 const messages = {
   zh: {
-    appTitle: 'KP·Explain This',
-    appSubtitle: '关键词即兴叙事',
+    appTitle: 'KP，编啊',
+    appSubtitle: '掷骰翻书，一起编故事',
+    tabletop: {
+      books: '桌上的书',
+      switchBook: '查看每个人的书',
+      mine: '我的书',
+      notebook: '故事记事本',
+      myKeywords: '我的关键词',
+      rules: '怎么玩',
+      keywordGuide: '每人的关键词都公开。轮到你时，用“我的关键词”讲述行动；悬停词语可查看骰面。',
+    },
 
     // 通用
     settings: '设置',
@@ -54,7 +63,9 @@ const messages = {
     validating: 'Validator 正在独立判定你的行动…',
     kpSceneOpening: 'KP · 场景',
     kpNarrative: 'KP · 推进',
-    actionPlaceholder: '描述你的行动（Enter 提交，Shift+Enter 换行）。行动必须真正用上你的三个关键词。',
+    actionPlaceholder: '用你的关键词讲述接下来的行动…',
+    actionLabel: '描述你的行动',
+    actionKeys: 'Enter 提交，Shift+Enter 换行',
     submitAction: '提交行动',
     abort: '中止',
     abortHint: '中止当前生成（该次输出将作废）',
@@ -80,10 +91,20 @@ const messages = {
     diceOverlay: {
       title: '掷骰',
       initialRoll: '合书初掷',
-      modFormula: '{num} mod {total} = {mod}',
+      modFormula: '{num} 除以 {total} 余 {remainder}，先定位第 {page} 页',
       flipTo: '翻到第 {n} / {total} 页',
       mappedNote: '第 {from} 页没有文字，就近翻到第 {to} 页',
       hint: '点击任意处继续',
+    },
+    bookmark: {
+      afterScene: '本场景结束后',
+      page: '翻到第 {n} 页',
+      how: '这枚书签怎样来的',
+      faces: '按落点从上到下、同行从左到右：{faces}',
+      digits: '10 作 0，连成 {digits}（数值 {number}）',
+      rollNote: '本轮结束后',
+      initialPage: '从这里开始',
+      dieFace: '骰面 {n}',
     },
 
     // 关键词条
@@ -92,15 +113,11 @@ const messages = {
     pcActingChip: '{name} 正在行动…',
     kpName: 'KP',
     kpTag: '主持人',
-    showKpKeywords: '显示',
-    hideKpKeywords: '隐藏',
-    nextFlipPage: '场景结束翻到第 {n} 页',
 
     // 书页
-    bookLabel: '的书',
+    bookOwner: '{name}的书',
     pageOf: '第 {current} / {total} 页',
     bookEmpty: '（没有内容）',
-    kpBookHidden: 'KP 的书页与关键词已隐藏',
 
     // 世界状态
     worldStateTitle: '世界状态',
@@ -141,7 +158,7 @@ const messages = {
       addLlmPc: '添加 LLM 玩家',
       llmPcHint: '由 LLM 扮演的玩家：每轮自主行动，同样要过 Validator 验证（走设置中的「LLM 玩家」连接）',
       diceCount: '骰子数量',
-      diceCountHint: '掷在书页上的 1d10 骰子个数（= 关键词个数）；骰面按个/十/百位组合决定翻页（3 个 ≈ 1d1000）',
+      diceCountHint: '掷在书页上的 1d10 骰子个数（= 关键词个数）；按落点阅读顺序把骰面排成数字决定翻页（3 个 ≈ 1d1000）',
       pageWords: '每页词数',
       pageWordsHint: 'TXT 虚拟分页的页大小，影响骰子落点密度（仅对 TXT 生效）',
       pdfNoPageWords: '已选 PDF：此设置只对 TXT 生效',

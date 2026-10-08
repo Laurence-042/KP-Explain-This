@@ -113,17 +113,6 @@ export function pageText(doc: BookDocument, pageIndex: number): string {
 }
 
 /**
- * 骰面 → 页内词位映射：每个骰子把页面分成 10 档，
- * die 落在 (die%10)/10 档的起点（与页码位约定一致：面 10 = 第 0 档），
- * 再偏移骰子序号避免同点数挤在同一位置。
- */
-export function dieToWordIndex(pageLen: number, dieValue: number, dieIndex: number): number {
-  if (pageLen <= 0) return 0
-  const pos = Math.floor(((dieValue % 10) / 10) * pageLen) + dieIndex
-  return Math.min(pageLen - 1, Math.max(0, pos))
-}
-
-/**
  * 在掷骰页取关键词：从骰子落点开始按全书全局序向后找第一个
  * "有效且未用过"的词（页内不足自动越页），书尾回绕书首；
  * 全书有效词耗尽则放宽去重约束，仍无则退化为落点词。
@@ -134,11 +123,13 @@ export function pickKeywordOnPage(
   dieValue: number,
   dieIndex: number,
   usedNorms: Set<string>,
+  landingWordIndex: number,
 ): KeywordPick {
   const total = globalWordCount(doc)
   if (total === 0) throw new Error('book has no words')
   const startPage = doc.pages[Math.min(Math.max(pageIndex, 0), doc.pages.length - 1)]
-  const begin = globalIndexOf(doc, pageIndex, dieToWordIndex(startPage.words.length, dieValue, dieIndex))
+  const wordIndex = Math.min(Math.max(landingWordIndex, 0), Math.max(0, startPage.words.length - 1))
+  const begin = globalIndexOf(doc, pageIndex, wordIndex)
 
   const isValidAt = (g: number) => {
     const { pageIndex: pi, wordIndex: wi } = locateWord(doc, g)

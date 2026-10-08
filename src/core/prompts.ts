@@ -19,27 +19,23 @@ export const KP_SYSTEM_PROMPT = `你是一场即兴叙事游戏的 KP（游戏�
 
 ## 输出格式（严格遵守）
 先输出给玩家看的叙事（markdown，约 100–250 字），以第二人称描述 PC 的所见所感，在结尾给玩家的下一步留出空间。
-然后输出一个 json 代码块，作为给系统使用的结构化状态变化：
+然后输出一个 \`\`\`json 围栏块，外层固定为 {"state_changes": {...}}。只写本次叙事实际发生的变化；未变化的字段省略，不能把示例值当作剧情事实。
 
+可选字段按用途分组：
+- 场景：location、time、scene 为字符串；scene_end 为布尔值。
+- 记录：facts_added、events_added 为字符串数组；plot_variables 的值只能是字符串、数字或布尔值。
+- 角色状态：player_changes 以【世界状态.players】中的实际角色 ID 为键，值是状态对象；npc_changes 以 NPC ID 为键。状态值只用字符串、数字或布尔值，不嵌套对象。
+- 物品：回应某位玩家行动时，inventory_added / inventory_removed 是该行动者获得 / 失去的字符串数组；开场或涉及其他角色时，用 inventory_changes 按实际角色 ID 写 {"added": [...], "removed": [...]}。物品不要放进 player_changes。
+
+以下只演示 JSON 结构，不提供剧情、道具或状态建议。尖括号是占位说明，实际输出时必须换成当前叙事中的真实值；没有对应变化就省略字段：
+1. 开场给指定角色物品：{"state_changes":{"inventory_changes":{"<实际角色ID>":{"added":["<已叙述的物品名>"]}}}}
+2. 玩家行动后，行动者失去物品且角色状态变化：{"state_changes":{"inventory_removed":["<已失去的物品名>"],"player_changes":{"<实际角色ID>":{"status":"<已叙述的新状态>"}}}}
+3. 没有状态变化：{"state_changes":{}}
+
+这三种结构互不要求同时出现。无论有无变化，结尾都必须输出一个机器可读的 JSON 围栏块；不要把 JSON 混进叙事正文。无变化时完整格式如下：
 \`\`\`json
-{
-  "state_changes": {
-    "location": "（可选）当前地点变化",
-    "time": "（可选）时间推移，如 '深夜'、'约一小时后'",
-    "scene": "（可选）当前场景的一句话概括",
-    "inventory_added": ["（可选）PC 获得的物品"],
-    "inventory_removed": ["（可选）PC 失去的物品"],
-    "npc_changes": { "npc_id": { "status": "..." } },
-    "player_changes": { "玩家名或ID": { "status": "..." } },
-    "facts_added": ["（可选）新确立的客观事实，如 '卧室窗户已经破碎'"],
-    "events_added": ["（可选）已发生的重要事件"],
-    "plot_variables": { "任意长期变量": "值" },
-    "scene_end": false
-  }
-}
+{"state_changes":{}}
 \`\`\`
-
-说明：只包含发生变化的字段；没有变化就输出空的 state_changes 对象。**这个 JSON 块是系统的机器可读输出，缺失会导致状态解析失败**——哪怕没有任何状态变化，也必须在结尾输出 \`\`\`json\n{"state_changes": {}}\n\`\`\`。
 
 ## 场景收尾（重要）
 每个场景都应当有清晰的收束点。当本场景的核心冲突/目标已经解决、或剧情自然到达一个停顿点（悬念留白）时，把 scene_end 设为 true，系统会自动翻页进入下一轮。不要为了拖长而迟迟不收尾——单个场景通常在 3~6 次玩家行动内收束。
@@ -82,10 +78,14 @@ export const VALIDATOR_SYSTEM_PROMPT = `你是一个独立的规则 Validator，
 /** KP 的 system prompt（动态）：铁律 + 当前世界状态 + 当前 KP 关键词 */
 export function buildKpSystemPrompt(world: WorldState, kpKeywords: string[], round: number): string {
   const keywords = kpKeywords.length ? kpKeywords.map((k) => `「${k}」`).join(' ') : '（无）'
+  const playerIds = Object.entries(world.players)
+    .map(([id, player]) => `${JSON.stringify(id)} = ${player.name ?? id}`)
+    .join('；') || '（暂无）'
   return [
     KP_SYSTEM_PROMPT,
     `## 当前轮次\n第 ${round} 轮。`,
     `## 本轮 KP 关键词（必须融入本场景的走向）\n${keywords}`,
+    `## 可用于 player_changes / inventory_changes 的角色 ID\n${playerIds}\n只能用这些 ID 作为第一层键，不要直接把 status 等状态字段放在 player_changes 下。`,
     `## 世界状态（Canonical World State，唯一事实源）\n\`\`\`json\n${JSON.stringify(world, null, 2)}\n\`\`\``,
   ].join('\n\n')
 }
@@ -102,7 +102,7 @@ export function buildKpSceneOpening(round: number, openingHint?: string): string
 
 /** 已验证行动交由 KP 推进 */
 export function buildKpResolveUser(action: PlayerAction, roleName: string): string {
-  return `【玩家行动（已通过 Validator 验证）】${roleName}：${action.text}\n\n请描述这一行动的结果并推进剧情。`
+  return `【玩家行动（已通过 Validator 验证）】${roleName}（角色 ID：${action.roleId}）：${action.text}\n\n请描述这一行动的结果并推进剧情。inventory_added/inventory_removed 归属这个行动角色。`
 }
 
 /** Validator 的完整消息（无状态，每次重建） */
@@ -134,15 +134,22 @@ export function validatorRetryPrefix(errorHint: string): string {
  * KP 忘记输出 state_changes 块时的修复请求（一次性、不入 KP 会话历史）：
  * 让模型从刚生成的叙事里提取状态变化，只回一个 JSON 块。
  */
-export function buildKpRepairMessages(narrative: string): Array<{ role: 'system' | 'user'; content: string }> {
+export function buildKpRepairMessages(
+  narrative: string,
+  world: WorldState,
+  actingRoleId?: string,
+): Array<{ role: 'system' | 'user'; content: string }> {
+  const playerIds = Object.entries(world.players)
+    .map(([id, player]) => `${JSON.stringify(id)} = ${player.name ?? id}`)
+    .join('；') || '（无）'
   return [
     {
       role: 'system',
-      content: `你是 JSON 提取器。根据给定的叙事文本提取状态变化，只输出一个 \`\`\`json 围栏块，不要输出任何其他文字。字段（只包含发生变化的）：location、time、scene、inventory_added、inventory_removed、npc_changes、player_changes、facts_added、events_added、plot_variables、scene_end。外层包一层 state_changes；没有变化就输出 {"state_changes": {}}。`,
+      content: `你是 JSON 提取器。只从叙事原文提取已发生的变化，不补写剧情事实。只输出一个 \`\`\`json 围栏块，外层为 {"state_changes": {...}}，无变化则为 {"state_changes": {}}。可选字段：location、time、scene、inventory_added、inventory_removed、inventory_changes、npc_changes、player_changes、facts_added、events_added、plot_variables、scene_end。顶层 inventory_added/inventory_removed 只归当前行动者；其他物品变化用 inventory_changes，以实际角色 ID 为键，其值是 added/removed 字符串数组。player_changes 也以实际角色 ID 为键，其值是状态对象。缺少明确归属时省略相应变化，不得编造 ID。`,
     },
     {
       role: 'user',
-      content: `叙事原文：\n${narrative}\n\n请输出对应的 state_changes JSON 块。`,
+      content: `可用玩家角色 ID：${playerIds}\n当前行动者：${actingRoleId && world.players[actingRoleId] ? actingRoleId : '（无）'}\n\n叙事原文：\n${narrative}\n\n请输出对应的 state_changes JSON 块。`,
     },
   ]
 }

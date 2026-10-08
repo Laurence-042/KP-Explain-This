@@ -60,13 +60,17 @@ export type KeywordPick = {
 export type RollResult = {
   dice: number[]
   picks: KeywordPick[]
-  /** sum(dice) mod 总页数（已取最近有效页） */
+  /** 落点阅读顺序组成的数字 mod 总页数（已取最近有效页） */
   nextPageIndex: number
 }
+
+export type DieLanding = { x: number; y: number }
 
 /** 合书初掷：只定初始页，不取词 */
 export type InitRollResult = {
   dice: number[]
+  /** 封面内归一化落点，与 dice 按原始骰子序号对应 */
+  landings: DieLanding[]
   pageIndex: number
 }
 
@@ -107,6 +111,8 @@ export type StateChanges = {
   /** 追加到行动角色的物品栏 */
   inventory_added?: string[]
   inventory_removed?: string[]
+  /** 无行动者或涉及其他角色时，按 roleId 指定物品变化 */
+  inventory_changes?: Record<RoleId, { added?: string[]; removed?: string[] }>
   npc_changes?: Record<string, ActorState>
   player_changes?: Record<string, ActorState>
   facts_added?: string[]

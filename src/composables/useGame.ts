@@ -21,7 +21,6 @@ import type {
   WorldState,
 } from '../core/types'
 import { parsePdfPages, parseTxt } from '../core/book'
-import { diceToNumber } from '../core/randomizer'
 import { buildPcAssistMessages } from '../core/prompts'
 import { narrativeViewForStream } from '../core/json-out'
 import {
@@ -63,12 +62,9 @@ export type DiceOverlayEntry = {
   isKp: boolean
   bookName: string
   dice: number[]
-  /** 骰面按位组合出的数（8·10·4 → 804），演出时展示推导算式 */
-  diceNumber: number
-  /** 取模算式直接得到的页索引（未经 nearestValidPage 映射） */
-  modPage: number
+  landings: Array<{ x: number; y: number }>
   keywords: string[]
-  /** 骰子落下的当前页文本（初掷为空：骰子落在封皮上） */
+  /** 初掷为即将翻开的目标页；其余为掷骰所在页 */
   pageText: string
   /** 每个骰子的落词信息 */
   lands: DiceLandPick[]
@@ -98,6 +94,8 @@ export function useGame(config: UseConfig) {
   const phase = ref<GamePhase>('setup')
   const round = ref(0)
   const roles = ref<RoleDef[]>([])
+  /** 当前客户端代表的角色。与当前正在查看哪本书分开，联机接入时可由会话身份设置。 */
+  const viewerRoleId = ref<RoleId | null>(null)
   const keywords = ref<Record<RoleId, string[]>>({})
   const pages = ref<Record<RoleId, number>>({})
   const rolls = ref<Record<RoleId, RoundRoll | null>>({})
@@ -108,8 +106,6 @@ export function useGame(config: UseConfig) {
   const streamingNarrative = computed(() => narrativeViewForStream(streamingRaw.value))
   const summarizing = ref(false)
   const flipTick = ref<Record<RoleId, number>>({})
-  const lastDice = ref<Record<RoleId, number[]>>({})
-  const kpKeywordsHidden = ref(false)
   const saveName = ref('')
   const hasLocalSave = ref(false)
   const awaitingAction = ref(false)
@@ -160,13 +156,12 @@ export function useGame(config: UseConfig) {
     if (!engine || !kpSession) return
     round.value = engine.round
     roles.value = engine.snapshot().roles
+    if (!roles.value.some((r) => r.id === viewerRoleId.value)) {
+      viewerRoleId.value = roles.value.find((r) => r.controller === 'human')?.id ?? null
+    }
     keywords.value = { ...engine.keywords }
     pages.value = { ...engine.pages }
     rolls.value = JSON.parse(JSON.stringify(engine.rolls))
-    // 骰面可从 rolls 派生：存档恢复没有掷骰事件，必须在这里重建（否则骰子行/推导 chip 消失）
-    lastDice.value = Object.fromEntries(
-      Object.entries(engine.rolls).map(([id, r]) => [id, r?.dice ?? []]),
-    )
     log.value = [...engine.log]
     world.value = JSON.parse(JSON.stringify(engine.world))
     sceneEndHint.value = engine.sceneEndHint
@@ -185,8 +180,7 @@ export function useGame(config: UseConfig) {
     ElMessage.error(t('requestFailed'))
   }
 
-  // ── 骰子 overlay：roll 事件进入；600ms 无新骰即视为本轮掷完，
-  //    组件按每个角色 ~3.6s 依次演出，这里只做兜底关闭 ──
+  // ── 骰子 overlay：只演出当前视角角色，开局先合书初掷、再在翻开页上掷骰 ──
 
   function pushOverlayEntry(entry: DiceOverlayEntry): void {
     const state = diceOverlay.value
@@ -227,7 +221,7 @@ export function useGame(config: UseConfig) {
         scheduleSave()
         break
       case 'init-roll': {
-        lastDice.value = { ...lastDice.value, [e.roleId]: e.dice }
+        if (e.roleId !== viewerRoleId.value) break
         const role = engine?.controllers.find((c) => c.role.id === e.roleId)?.role
         const book = role ? bookDocs[role.bookId] : undefined
         const total = totalPagesOf(e.roleId)
@@ -237,10 +231,9 @@ export function useGame(config: UseConfig) {
           isKp: role?.kind === 'kp',
           bookName: book?.name ?? '',
           dice: e.dice,
-          diceNumber: diceToNumber(e.dice),
-          modPage: total > 0 ? diceToNumber(e.dice) % total : 0,
+          landings: e.landings,
           keywords: [],
-          pageText: '',
+          pageText: book?.pages[e.pageIndex]?.text ?? '',
           lands: [],
           nextPage: e.pageIndex,
           totalPages: total,
@@ -249,7 +242,10 @@ export function useGame(config: UseConfig) {
         break
       }
       case 'roll': {
-        lastDice.value = { ...lastDice.value, [e.roleId]: e.roll.dice }
+        if (e.roleId !== viewerRoleId.value) {
+          syncAll()
+          break
+        }
         const role = engine?.controllers.find((c) => c.role.id === e.roleId)?.role
         const book = role ? bookDocs[role.bookId] : undefined
         const currentPage = engine?.pages[e.roleId] ?? 0
@@ -260,8 +256,7 @@ export function useGame(config: UseConfig) {
           isKp: role?.kind === 'kp',
           bookName: book?.name ?? '',
           dice: e.roll.dice,
-          diceNumber: diceToNumber(e.roll.dice),
-          modPage: total > 0 ? diceToNumber(e.roll.dice) % total : 0,
+          landings: [],
           keywords: e.roll.picks.map((p) => p.keyword),
           pageText: book?.pages[currentPage]?.text ?? '',
           lands: e.roll.picks.map((p) => ({
@@ -447,9 +442,9 @@ export function useGame(config: UseConfig) {
     saveName.value = `${kpStoredName} · ${new Date().toLocaleString()}`
     log.value = []
     streamingRaw.value = ''
-    kpKeywordsHidden.value = false
     awaitingAction.value = false
     pcActing.value = ''
+    viewerRoleId.value = pcRoleDef.id
     view.value = 'game'
     void engine.start(controllers, validatorSession, bookDocs, setup.diceCount).catch(() => {})
     scheduleSave()
@@ -534,6 +529,7 @@ export function useGame(config: UseConfig) {
     pcLlmSessions = {}
     pcLlmClient = null
     view.value = 'setup'
+    viewerRoleId.value = null
     phase.value = 'setup'
     log.value = []
     world.value = null
@@ -752,9 +748,9 @@ export function useGame(config: UseConfig) {
 
   return {
     // 状态
-    view, phase, phaseLabel, round, roles, keywords, pages, rolls, log, world,
-    sceneEndHint, streamingNarrative, summarizing, flipTick, lastDice,
-    kpKeywordsHidden, saveName, hasLocalSave, diagnostics, diagnosticsOpen,
+    view, phase, phaseLabel, round, roles, viewerRoleId, keywords, pages, rolls, log, world,
+    sceneEndHint, streamingNarrative, summarizing, flipTick,
+    saveName, hasLocalSave, diagnostics, diagnosticsOpen,
     awaitingAction, diceOverlay, pcActing, assistInsert, assisting,
     kpRole, pcRole, running, canSubmit, canReroll,
     // 书库

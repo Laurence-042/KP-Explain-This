@@ -127,6 +127,25 @@ async function start(engine: GameEngine, controllers: RoleController[], books: R
 }
 
 describe('GameEngine：控制器驱动循环', () => {
+  it('单玩家开场的顶层物品变化归给唯一玩家', async () => {
+    const opening = '你捡起钥匙。\n\n```json\n{"inventory_added":["钥匙"]}\n```'
+    const ctx = makeGame([opening])
+    await start(ctx.engine, [ctx.kp, ctx.human], ctx.books)
+    await waitFor(() => ctx.human.awaitingAction)
+    expect(ctx.engine.world.inventory['pc-a']).toContain('钥匙')
+    expect(ctx.engine.log.some((entry) => entry.type === 'warning' && entry.text.includes('没有明确的行动玩家'))).toBe(false)
+    ctx.engine.stop()
+  })
+  it('单玩家开场接受状态简写，不把状态字段误当玩家名', async () => {
+    const opening = '你从梦中醒来。\n\n```json\n{"player_changes":{"awake":true,"state":{"status":"清醒"}}}\n```'
+    const ctx = makeGame([opening])
+    await start(ctx.engine, [ctx.kp, ctx.human], ctx.books)
+    await waitFor(() => ctx.human.awaitingAction)
+    expect(ctx.engine.world.players['pc-a']).toMatchObject({ awake: true, status: '清醒' })
+    expect(ctx.engine.log.some((entry) => entry.type === 'warning' && entry.text.includes('player_changes'))).toBe(false)
+    ctx.engine.stop()
+  })
+
   it('开局 → 掷骰 → KP 场景 → 等待玩家行动（human controller 挂起）', async () => {
     const ctx = makeGame([KP_SCENE_REPLY])
     await start(ctx.engine, [ctx.kp, ctx.human], ctx.books)
@@ -294,7 +313,8 @@ describe('GameEngine：中断与重试', () => {
 
 describe('GameEngine：多 PC 扩展（同基类架构验证）', () => {
   it('两个真人 PC 依次行动，各自验证并推进', async () => {
-    const ctx = makeGame([KP_SCENE_REPLY, KP_RESOLVE_REPLY, KP_RESOLVE_END_REPLY, KP_NEXT_SCENE_REPLY])
+    const bResolve = '仓库的门在身后合拢，这一夜结束了。\n\n```json\n{"inventory_added":["铜铃"],"player_changes":{"awake":true},"scene_end":true}\n```'
+    const ctx = makeGame([KP_SCENE_REPLY, KP_RESOLVE_REPLY, bResolve, KP_NEXT_SCENE_REPLY])
     const pcB: RoleDef = { id: 'pc-b', name: '玩家B', kind: 'pc', controller: 'human', bookId: 'b1' }
     const humanB = new HumanController(pcB)
 
@@ -312,6 +332,10 @@ describe('GameEngine：多 PC 扩展（同基类架构验证）', () => {
     await waitFor(() => ctx.human.awaitingAction && ctx.engine.round === 2)
     expect(ctx.engine.log.some((l) => l.type === 'action' && l.roleId === 'pc-b')).toBe(true)
     expect(narrativeAfterA).toBeTruthy()
+    expect(ctx.engine.world.inventory['pc-a']).toContain('生锈的钥匙')
+    expect(ctx.engine.world.inventory['pc-a']).not.toContain('铜铃')
+    expect(ctx.engine.world.inventory['pc-b']).toContain('铜铃')
+    expect(ctx.engine.world.players['pc-b'].awake).toBe(true)
     ctx.engine.stop()
   })
 })

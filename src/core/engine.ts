@@ -1,5 +1,6 @@
 import type {
   BookDocument,
+  DieLanding,
   GameLogEntry,
   GamePhase,
   RoleDef,
@@ -27,7 +28,7 @@ import type { ActionRequest, ActionRequestKind, ControllerResponse, RoleControll
 export type EngineEvent =
   | { type: 'phase'; phase: GamePhase }
   | { type: 'log'; entry: GameLogEntry }
-  | { type: 'init-roll'; roleId: RoleId; dice: number[]; pageIndex: number }
+  | { type: 'init-roll'; roleId: RoleId; dice: number[]; landings: DieLanding[]; pageIndex: number }
   | { type: 'roll'; roleId: RoleId; round: number; roll: RoundRoll }
   | { type: 'flip'; roleId: RoleId; pageIndex: number; nextPage: boolean }
   | { type: 'kp-stream'; delta: string }
@@ -177,7 +178,7 @@ export class GameEngine {
       const init = rollInitPage(book, diceCount)
       this.pages[c.role.id] = init.pageIndex
       this.pendingNextPages[c.role.id] = init.pageIndex
-      this.emit({ type: 'init-roll', roleId: c.role.id, dice: init.dice, pageIndex: init.pageIndex })
+      this.emit({ type: 'init-roll', roleId: c.role.id, dice: init.dice, landings: init.landings, pageIndex: init.pageIndex })
     }
     this.addLog({ type: 'system', text: '合书初掷完成，各角色翻开初始页。', round: 0 })
 
@@ -315,10 +316,15 @@ export class GameEngine {
     this.abortController = null
 
     const parsed = parseKpOutput(resp.text)
-    const { changes, warnings } = sanitizeStateChanges(parsed.stateChangesRaw)
+    const actingRoleId = validatedAction?.roleId ?? ''
+    const playerIds = Object.keys(this.world.players)
+    const shorthandRoleId = actingRoleId || (playerIds.length === 1 ? playerIds[0] : '')
+    const { changes, warnings } = sanitizeStateChanges(
+      parsed.stateChangesRaw,
+      shorthandRoleId ? { players: this.world.players, actingRoleId: shorthandRoleId } : undefined,
+    )
     for (const w of parsed.warnings) this.addLog({ type: 'warning', round: this.round, text: `KP 输出解析：${w}` })
-    const actingRole = this.pcControllers[0]
-    const applyResult = applyStateChanges(this.world, changes, actingRole ? actingRole.role.id : '')
+    const applyResult = applyStateChanges(this.world, changes, shorthandRoleId)
     for (const w of warnings) this.addLog({ type: 'warning', round: this.round, text: `state_changes 清洗：${w}` })
     for (const w of applyResult.warnings) this.addLog({ type: 'warning', round: this.round, text: w })
 

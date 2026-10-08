@@ -81,6 +81,49 @@ function asActorChanges(
   return out
 }
 
+type PlayerChangeContext = { players: Record<string, ActorState>; actingRoleId: string }
+
+/**
+ * KP 偶尔省略角色 ID，直接给出当前行动者的状态字段。
+ * 只识别明确的状态字段；其他未知键仍按玩家名处理并发出 warning。
+ */
+function asPlayerChanges(
+  value: unknown,
+  warnings: string[],
+  context?: PlayerChangeContext,
+): Record<string, ActorState> | undefined {
+  if (!context || !isPlainObject(value) || !context.players[context.actingRoleId]) {
+    return asActorChanges(value, 'player_changes', warnings)
+  }
+  const keys = Object.keys(value)
+  const playerNames = Object.values(context.players).map((p) => normItem(p.name ?? ''))
+  const hasPlayerKey = keys.some((key) => context.players[key] || playerNames.includes(normItem(key)))
+  const directFields = new Set(['status', 'state', 'awake', 'alive', 'injured', 'hp', 'health', 'mood', 'condition', 'location'])
+  if (hasPlayerKey || !keys.length || !keys.every((key) => directFields.has(key))) {
+    return asActorChanges(value, 'player_changes', warnings)
+  }
+
+  const patch: ActorState = {}
+  for (const [key, fieldValue] of Object.entries(value)) {
+    if (key === 'state' && isPlainObject(fieldValue)) {
+      for (const [nestedKey, nestedValue] of Object.entries(fieldValue)) {
+        if (typeof nestedValue === 'string' || typeof nestedValue === 'number' || typeof nestedValue === 'boolean') {
+          patch[nestedKey] = nestedValue
+        } else {
+          warnings.push(`player_changes.state.${nestedKey} 的值类型不支持，已丢弃`)
+        }
+      }
+    } else if (key === 'state' && typeof fieldValue === 'string') {
+      patch.status = fieldValue
+    } else if (typeof fieldValue === 'string' || typeof fieldValue === 'number' || typeof fieldValue === 'boolean') {
+      patch[key] = fieldValue
+    } else {
+      warnings.push(`player_changes.${key} 的值类型不支持，已丢弃`)
+    }
+  }
+  return { [context.actingRoleId]: patch }
+}
+
 function asPlotVariables(
   v: unknown,
   field: string,
@@ -99,8 +142,37 @@ function asPlotVariables(
   return out
 }
 
+function asInventoryChanges(
+  value: unknown,
+  warnings: string[],
+): StateChanges['inventory_changes'] {
+  if (value === undefined) return undefined
+  if (!isPlainObject(value)) {
+    warnings.push('字段 inventory_changes 应为按角色 ID 索引的对象，已忽略')
+    return undefined
+  }
+  const out: NonNullable<StateChanges['inventory_changes']> = Object.create(null)
+  for (const [roleId, patch] of Object.entries(value)) {
+    if (!roleId.trim() || !isPlainObject(patch)) {
+      warnings.push(`inventory_changes.${roleId} 应为对象，已忽略`)
+      continue
+    }
+    for (const key of Object.keys(patch)) {
+      if (key !== 'added' && key !== 'removed') warnings.push(`inventory_changes.${roleId}.${key} 未知，已忽略`)
+    }
+    out[roleId] = {
+      added: asStringList(patch.added, `inventory_changes.${roleId}.added`, warnings),
+      removed: asStringList(patch.removed, `inventory_changes.${roleId}.removed`, warnings),
+    }
+  }
+  return out
+}
+
 /** 把未知的 LLM 输出清洗成受控的 StateChanges；未知字段丢弃并记录 warning */
-export function sanitizeStateChanges(rawInput: unknown): { changes: StateChanges; warnings: string[] } {
+export function sanitizeStateChanges(
+  rawInput: unknown,
+  context?: PlayerChangeContext,
+): { changes: StateChanges; warnings: string[] } {
   const warnings: string[] = []
   const changes: StateChanges = {}
   if (!isPlainObject(rawInput)) {
@@ -115,7 +187,7 @@ export function sanitizeStateChanges(rawInput: unknown): { changes: StateChanges
     delete raw.state_changes
   }
   const knownKeys = new Set([
-    'location', 'time', 'scene', 'inventory_added', 'inventory_removed',
+    'location', 'time', 'scene', 'inventory_added', 'inventory_removed', 'inventory_changes',
     'npc_changes', 'player_changes', 'facts_added', 'events_added',
     'plot_variables', 'scene_end',
   ])
@@ -128,8 +200,9 @@ export function sanitizeStateChanges(rawInput: unknown): { changes: StateChanges
   changes.scene = asTrimmedString(raw.scene)
   changes.inventory_added = asStringList(raw.inventory_added, 'inventory_added', warnings)
   changes.inventory_removed = asStringList(raw.inventory_removed, 'inventory_removed', warnings)
+  changes.inventory_changes = asInventoryChanges(raw.inventory_changes, warnings)
   changes.npc_changes = asActorChanges(raw.npc_changes, 'npc_changes', warnings)
-  changes.player_changes = asActorChanges(raw.player_changes, 'player_changes', warnings)
+  changes.player_changes = asPlayerChanges(raw.player_changes, warnings, context)
   changes.facts_added = asStringList(raw.facts_added, 'facts_added', warnings)
   changes.events_added = asStringList(raw.events_added, 'events_added', warnings)
   changes.plot_variables = asPlotVariables(raw.plot_variables, 'plot_variables', warnings)
@@ -161,7 +234,7 @@ function mergeActor(target: ActorState, patch: ActorState): void {
 
 /**
  * 将（已清洗的）state_changes 合并进世界状态。
- * inventory_* 作用于行动角色；npc/player changes 按名字键合并。
+ * 顶层 inventory_* 作用于行动角色；inventory_changes 用明确 roleId。
  */
 export function applyStateChanges(
   world: WorldState,
@@ -173,13 +246,27 @@ export function applyStateChanges(
   if (changes.time) world.time = changes.time
   if (changes.scene) world.scene = changes.scene
 
-  const inv = (world.inventory[actingRoleId] ??= [])
-  for (const item of changes.inventory_added ?? []) pushUnique(inv, item)
-  for (const item of changes.inventory_removed ?? []) {
-    const norm = normItem(item)
-    const idx = inv.findIndex((x) => normItem(x) === norm)
-    if (idx >= 0) inv.splice(idx, 1)
-    else warnings.push(`物品 "${item}" 不在 ${actingRoleId} 的物品栏中，无法移除`)
+  const changeInventory = (roleId: string, added: string[], removed: string[]) => {
+    const inv = (world.inventory[roleId] ??= [])
+    for (const item of added) pushUnique(inv, item)
+    for (const item of removed) {
+      const norm = normItem(item)
+      const idx = inv.findIndex((x) => normItem(x) === norm)
+      if (idx >= 0) inv.splice(idx, 1)
+      else warnings.push(`物品 "${item}" 不在 ${roleId} 的物品栏中，无法移除`)
+    }
+  }
+  if (world.players[actingRoleId]) {
+    changeInventory(actingRoleId, changes.inventory_added ?? [], changes.inventory_removed ?? [])
+  } else if ((changes.inventory_added?.length ?? 0) + (changes.inventory_removed?.length ?? 0) > 0) {
+    warnings.push('没有明确的行动玩家，顶层 inventory_added/inventory_removed 已忽略；请用 inventory_changes 按角色 ID 指定物品')
+  }
+  for (const [roleId, patch] of Object.entries(changes.inventory_changes ?? {})) {
+    if (!Object.prototype.hasOwnProperty.call(world.players, roleId)) {
+      warnings.push(`inventory_changes 中的 "${roleId}" 无法匹配任何玩家，已忽略`)
+      continue
+    }
+    changeInventory(roleId, patch.added ?? [], patch.removed ?? [])
   }
 
   for (const [key, patch] of Object.entries(changes.npc_changes ?? {})) {
